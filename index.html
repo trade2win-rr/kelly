@@ -1,262 +1,179 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <meta name="description" content="A Kelly Criterion goal simulator and position-sizing calculator for traders." />
-  <title>KellyLab — Trading Kelly Simulator</title>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="description" content="A no-leverage Kelly allocation calculator, trading goal simulator, and risk-of-ruin model." />
+  <title>KellyLab</title>
   <link rel="stylesheet" href="styles.css" />
 </head>
 <body>
   <div class="app-shell">
     <header class="topbar">
       <div>
-        <p class="eyebrow">TRADING RISK TOOLKIT</p>
+        <p class="eyebrow">TRADING ALLOCATION TOOL</p>
         <h1>Kelly<span>Lab</span></h1>
       </div>
-      <button id="themeToggle" class="icon-button" type="button" aria-label="Toggle theme">◐</button>
+      <button id="themeToggle" class="icon-button" type="button" aria-label="Toggle dark mode">◐</button>
     </header>
 
     <section class="hero card">
       <div>
-        <p class="eyebrow">MODEL THE EDGE. CONTROL THE RISK.</p>
-        <h2>Estimate how long your trading edge may take to reach a dollar goal.</h2>
-        <p class="hero-copy">
-          Enter your win rate, average win and loss, Kelly fraction, and trading frequency. KellyLab then simulates thousands of possible account paths and converts the result into an estimated calendar timeline.
-        </p>
+        <p class="eyebrow">POSITION RETURNS, NOT R MULTIPLES</p>
+        <h2>Enter what your average trade actually gains or loses.</h2>
+        <p>The app uses your win rate, average winning-trade return, and average losing-trade return to calculate Kelly allocation. It does not assume a winner doubles your money.</p>
       </div>
-      <div class="hero-stat-grid">
-        <div>
-          <span id="heroKelly">—</span>
-          <small>Full Kelly</small>
-        </div>
-        <div>
-          <span id="heroRisk">—</span>
-          <small>Risk used per trade</small>
-        </div>
-        <div>
-          <span id="heroExpectancy">—</span>
-          <small>Expectancy</small>
-        </div>
+      <div class="hero-metrics">
+        <div><strong id="heroFull">—</strong><span>Full Kelly allocation</span></div>
+        <div><strong id="heroHalf">—</strong><span>Half Kelly allocation</span></div>
+        <div><strong id="heroQuarter">—</strong><span>Quarter Kelly allocation</span></div>
       </div>
     </section>
 
-    <nav class="tab-list" aria-label="Calculator sections">
-      <button class="tab-button active" data-tab="simulator" type="button">Goal Simulator</button>
-      <button class="tab-button" data-tab="sizer" type="button">Kelly Size Calculator</button>
-      <button class="tab-button" data-tab="method" type="button">How It Works</button>
+    <nav class="tabs" aria-label="App sections">
+      <button class="tab active" type="button" data-panel="goalPanel">Goal simulator</button>
+      <button class="tab" type="button" data-panel="sizePanel">Kelly size calculator</button>
+      <button class="tab" type="button" data-panel="methodPanel">How it works</button>
     </nav>
 
     <main>
-      <section id="simulator" class="tab-panel active">
-        <div class="two-column">
-          <form id="simulatorForm" class="card form-card" novalidate>
-            <div class="section-heading">
-              <div>
-                <p class="eyebrow">GOAL MODEL</p>
-                <h3>Your trading assumptions</h3>
-              </div>
-              <button class="text-button" id="resetSimulator" type="button">Reset</button>
+      <section id="goalPanel" class="panel active">
+        <div class="layout">
+          <form id="goalForm" class="card form-card" novalidate>
+            <div class="section-title">
+              <div><p class="eyebrow">GOAL INPUTS</p><h3>Trade statistics</h3></div>
+              <button id="resetGoal" class="link-button" type="button">Reset</button>
             </div>
 
             <div class="field-grid">
-              <label>
-                Starting capital
-                <div class="input-prefix"><span>$</span><input id="startCapital" class="money-input" type="text" inputmode="numeric" data-max-decimals="0" data-min-decimals="0" value="100,000" autocomplete="off" /></div>
+              <label>Starting capital
+                <div class="money-wrap"><span>$</span><input id="startCapital" class="money-input" type="text" inputmode="decimal" data-decimals="0" value="100,000" /></div>
               </label>
-              <label>
-                Target capital
-                <div class="input-prefix"><span>$</span><input id="targetCapital" class="money-input" type="text" inputmode="numeric" data-max-decimals="0" data-min-decimals="0" value="1,000,000" autocomplete="off" /></div>
+              <label>Target capital
+                <div class="money-wrap"><span>$</span><input id="targetCapital" class="money-input" type="text" inputmode="decimal" data-decimals="0" value="5,000,000" /></div>
               </label>
-              <label>
-                Win rate
-                <div class="input-suffix"><input id="simWinRate" type="number" inputmode="decimal" step="any" value="55" /><span>%</span></div>
+              <label>Ruin threshold
+                <div class="money-wrap"><span>$</span><input id="ruinCapital" class="money-input" type="text" inputmode="decimal" data-decimals="0" value="10,000" /></div>
+                <small>Ruin means touching this level before reaching the target.</small>
               </label>
-              <label>
-                Average winner
-                <div class="input-suffix"><input id="simAvgWin" type="number" inputmode="decimal" step="any" value="1.5" /><span>R</span></div>
-                <span class="field-help">Example: enter 1.5 when your average winner is 1.5 times your average loss.</span>
+              <label>Win rate
+                <div class="suffix-wrap"><input id="goalWinRate" type="number" inputmode="decimal" step="any" value="60" /><span>%</span></div>
               </label>
-              <label>
-                Average loser
-                <div class="input-suffix"><input id="simAvgLoss" type="number" inputmode="decimal" step="any" value="1" /><span>R</span></div>
-                <span class="field-help">Usually enter 1. You can also enter 15 and 10 for a 15% winner and 10% loser.</span>
+              <label>Average winning trade
+                <div class="suffix-wrap"><input id="goalAvgWin" type="number" inputmode="decimal" step="any" value="10" /><span>%</span></div>
+                <small>Return on the capital placed in the trade.</small>
               </label>
-              <label>
-                Kelly fraction used
-                <select id="simKellyScale">
-                  <option value="1">Full Kelly</option>
-                  <option value="0.5">Half Kelly</option>
-                  <option value="0.25" selected>Quarter Kelly</option>
-                  <option value="0.1">One-tenth Kelly</option>
+              <label>Average losing trade
+                <div class="suffix-wrap"><input id="goalAvgLoss" type="number" inputmode="decimal" step="any" value="5" /><span>%</span></div>
+                <small>Enter a positive loss magnitude, such as 5.</small>
+              </label>
+              <label>Average trades per week
+                <input id="tradesPerWeek" type="number" inputmode="decimal" step="any" value="10" />
+              </label>
+              <label>Simulation horizon
+                <select id="horizonYears">
+                  <option value="1">1 year</option>
+                  <option value="3">3 years</option>
+                  <option value="5" selected>5 years</option>
+                  <option value="10">10 years</option>
                 </select>
               </label>
-              <label>
-                Average trades per week
-                <input id="tradesPerWeek" type="number" inputmode="decimal" step="any" value="10" />
-                <span class="field-help">This converts the number of trades into weeks, months, and years.</span>
-              </label>
-              <label>
-                Number of simulations
+              <label>Number of simulations
                 <select id="simulationCount">
-                  <option value="1000">1,000 — faster</option>
-                  <option value="5000" selected>5,000 — recommended</option>
-                  <option value="10000">10,000 — more precise</option>
+                  <option value="500">500 — fast</option>
+                  <option value="1000" selected>1,000 — recommended</option>
+                  <option value="2500">2,500 — more stable</option>
                 </select>
               </label>
             </div>
 
-            <div id="simulatorMessage" class="message hidden" role="status"></div>
+            <div id="goalError" class="message hidden" role="alert"></div>
             <button class="primary-button" type="submit">Estimate time to goal</button>
-            <p class="microcopy">No random seed or manual trade limit is needed. The app automatically creates a repeatable simulation horizon based on your edge, target, and trading frequency.</p>
+            <p class="fine-print">No correlation adjustment is included. Each trade is modeled independently as either your average winner or average loser.</p>
           </form>
 
           <div class="results-stack">
-            <section class="card result-summary-card">
-              <div class="section-heading">
-                <div>
-                  <p class="eyebrow">TIME TO TARGET</p>
-                  <h3>Your estimated path</h3>
-                </div>
-                <button id="downloadCsv" class="text-button" type="button" disabled>Download CSV</button>
+            <section class="card">
+              <div class="section-title">
+                <div><p class="eyebrow">KELLY OUTPUT</p><h3>Suggested capital per trade</h3></div>
+                <span class="pill">No leverage</span>
               </div>
+              <div id="goalKellyCards" class="kelly-card-grid placeholder-grid">
+                <p>Run the simulator to calculate full, half, and quarter Kelly.</p>
+              </div>
+              <div id="allocationNote" class="info-box hidden"></div>
+            </section>
 
-              <div id="simulationSummary" class="simulation-summary">
-                Enter your assumptions and run the simulator to estimate the time needed to reach your goal.
+            <section class="card">
+              <div class="section-title">
+                <div><p class="eyebrow">MONTE CARLO RESULTS</p><h3>Time, ruin, and drawdown</h3></div>
+                <button id="downloadCsv" class="link-button" type="button" disabled>Download CSV</button>
               </div>
-
-              <div class="metric-grid time-metric-grid">
-                <article class="metric primary-metric large-metric">
-                  <span>Most likely time</span>
-                  <strong id="medianTime">—</strong>
-                  <small>median successful path</small>
-                </article>
-                <article class="metric">
-                  <span>Faster outcome</span>
-                  <strong id="fastTime">—</strong>
-                  <small>25% of successful paths arrived by this time</small>
-                </article>
-                <article class="metric">
-                  <span>Slower outcome</span>
-                  <strong id="slowTime">—</strong>
-                  <small>75% of successful paths arrived by this time</small>
-                </article>
-                <article class="metric">
-                  <span>Median trades needed</span>
-                  <strong id="medianTrades">—</strong>
-                  <small>before reaching the target</small>
-                </article>
-                <article class="metric">
-                  <span>Chance within 1 year</span>
-                  <strong id="chanceOneYear">—</strong>
-                  <small>at your entered trade frequency</small>
-                </article>
-                <article class="metric">
-                  <span>Chance within 3 years</span>
-                  <strong id="chanceThreeYears">—</strong>
-                  <small>at your entered trade frequency</small>
-                </article>
-                <article class="metric">
-                  <span>Chance within 5 years</span>
-                  <strong id="chanceFiveYears">—</strong>
-                  <small>at your entered trade frequency</small>
-                </article>
-                <article class="metric">
-                  <span>Reached in simulation</span>
-                  <strong id="reachProbability">—</strong>
-                  <small id="reachProbabilityNote">within the automatic horizon</small>
-                </article>
-                <article class="metric">
-                  <span>Median maximum drawdown</span>
-                  <strong id="medianDrawdown">—</strong>
-                  <small>all simulated paths</small>
-                </article>
-                <article class="metric">
-                  <span>Risk of a 50% drawdown</span>
-                  <strong id="deepDrawdownRisk">—</strong>
-                  <small>before the path ended</small>
-                </article>
+              <div class="table-wrap">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Kelly level</th>
+                      <th>Allocation</th>
+                      <th>Starting 1R</th>
+                      <th>Median trades</th>
+                      <th>Median time</th>
+                      <th>Target chance</th>
+                      <th>Risk of ruin</th>
+                      <th>Median max DD</th>
+                    </tr>
+                  </thead>
+                  <tbody id="goalResultsBody">
+                    <tr><td colspan="8" class="empty-cell">Run the simulator to see results.</td></tr>
+                  </tbody>
+                </table>
               </div>
-
-              <div class="assumption-strip">
-                <div><span>Risk used</span><strong id="appliedRiskResult">—</strong></div>
-                <div><span>Account gain on average win</span><strong id="winImpactResult">—</strong></div>
-                <div><span>Account loss on average loss</span><strong id="lossImpactResult">—</strong></div>
-                <div><span>Automatic horizon</span><strong id="automaticHorizonResult">—</strong></div>
-              </div>
+              <p id="goalSummary" class="summary-text">The result will explain exactly how much each average win and loss changes the account.</p>
             </section>
 
             <section class="card chart-card">
-              <div class="section-heading">
-                <div>
-                  <p class="eyebrow">SAMPLE PATHS</p>
-                  <h3>Account trajectories over time</h3>
-                </div>
-                <span class="pill">Log scale</span>
+              <div class="section-title">
+                <div><p class="eyebrow">SAMPLE PATHS</p><h3 id="chartTitle">Full Kelly paths</h3></div>
+                <select id="chartScenario" disabled>
+                  <option value="full">Full Kelly</option>
+                  <option value="half">Half Kelly</option>
+                  <option value="quarter">Quarter Kelly</option>
+                </select>
               </div>
-              <canvas id="pathChart" width="900" height="440" aria-label="Simulated account paths over time"></canvas>
-              <div class="chart-legend">
-                <span><i class="legend-line target-line"></i>Target</span>
-                <span><i class="legend-line median-line"></i>Path closest to median result</span>
-                <span><i class="legend-line path-line"></i>Other sample paths</span>
-              </div>
+              <canvas id="pathChart" width="980" height="420" aria-label="Sample simulated account paths"></canvas>
             </section>
           </div>
         </div>
       </section>
 
-      <section id="sizer" class="tab-panel">
-        <div class="two-column">
-          <form id="sizerForm" class="card form-card" novalidate>
-            <div class="section-heading">
-              <div>
-                <p class="eyebrow">POSITION SIZING</p>
-                <h3>Kelly size calculator</h3>
-              </div>
-              <button class="text-button" id="resetSizer" type="button">Reset</button>
+      <section id="sizePanel" class="panel">
+        <div class="layout">
+          <form id="sizeForm" class="card form-card" novalidate>
+            <div class="section-title">
+              <div><p class="eyebrow">SIZE INPUTS</p><h3>Kelly bet amount</h3></div>
+              <button id="resetSize" class="link-button" type="button">Reset</button>
             </div>
-
             <div class="field-grid">
-              <label>
-                Account equity
-                <div class="input-prefix"><span>$</span><input id="accountEquity" class="money-input" type="text" inputmode="numeric" data-max-decimals="0" data-min-decimals="0" value="100,000" autocomplete="off" /></div>
+              <label>Account equity
+                <div class="money-wrap"><span>$</span><input id="accountEquity" class="money-input" type="text" inputmode="decimal" data-decimals="0" value="100,000" /></div>
               </label>
-              <label>
-                Win rate
-                <div class="input-suffix"><input id="sizeWinRate" type="number" inputmode="decimal" step="any" value="55" /><span>%</span></div>
+              <label>Win rate
+                <div class="suffix-wrap"><input id="sizeWinRate" type="number" inputmode="decimal" step="any" value="60" /><span>%</span></div>
               </label>
-              <label>
-                Average winner
-                <div class="input-suffix"><input id="sizeAvgWin" type="number" inputmode="decimal" step="any" value="1.5" /><span>R</span></div>
+              <label>Average winning trade
+                <div class="suffix-wrap"><input id="sizeAvgWin" type="number" inputmode="decimal" step="any" value="10" /><span>%</span></div>
               </label>
-              <label>
-                Average loser
-                <div class="input-suffix"><input id="sizeAvgLoss" type="number" inputmode="decimal" step="any" value="1" /><span>R</span></div>
+              <label>Average losing trade
+                <div class="suffix-wrap"><input id="sizeAvgLoss" type="number" inputmode="decimal" step="any" value="5" /><span>%</span></div>
               </label>
-              <label>
-                Kelly fraction used
-                <select id="sizeKellyScale">
-                  <option value="1">Full Kelly</option>
-                  <option value="0.5">Half Kelly</option>
-                  <option value="0.25" selected>Quarter Kelly</option>
-                  <option value="0.1">One-tenth Kelly</option>
-                </select>
+              <label>Entry price
+                <div class="money-wrap"><span>$</span><input id="entryPrice" class="money-input" type="text" inputmode="decimal" data-decimals="2" value="100.00" /></div>
               </label>
-              <label>
-                Entry price
-                <div class="input-prefix"><span>$</span><input id="entryPrice" class="money-input" type="text" inputmode="decimal" data-max-decimals="4" data-min-decimals="2" value="100.00" autocomplete="off" /></div>
-              </label>
-              <label>
-                Stop price
-                <div class="input-prefix"><span>$</span><input id="stopPrice" class="money-input" type="text" inputmode="decimal" data-max-decimals="4" data-min-decimals="2" value="95.00" autocomplete="off" /></div>
-              </label>
-              <label>
-                Contract / share multiplier
+              <label>Share / contract multiplier
                 <input id="unitMultiplier" type="number" inputmode="decimal" step="any" value="1" />
-                <span class="field-help">Use 1 for shares and 100 for standard equity-option contracts.</span>
+                <small>Use 1 for shares; 100 for a standard option contract.</small>
               </label>
-              <label>
-                Round units to
+              <label>Round units to
                 <select id="roundingIncrement">
                   <option value="1" selected>1 unit</option>
                   <option value="5">5 units</option>
@@ -265,92 +182,55 @@
                 </select>
               </label>
             </div>
-
-            <div id="sizerMessage" class="message hidden" role="status"></div>
-            <button class="primary-button" type="submit">Calculate position size</button>
+            <div id="sizeError" class="message hidden" role="alert"></div>
+            <button class="primary-button" type="submit">Calculate Kelly size</button>
           </form>
 
-          <section class="card size-results-card">
-            <div class="section-heading">
-              <div>
-                <p class="eyebrow">SIZING OUTPUT</p>
-                <h3>Suggested risk and position</h3>
-              </div>
-              <span id="edgeBadge" class="pill neutral">Waiting for inputs</span>
+          <section class="card">
+            <div class="section-title">
+              <div><p class="eyebrow">SIZING RESULTS</p><h3>Full, half, and quarter Kelly</h3></div>
+              <span class="pill">No leverage</span>
             </div>
-
-            <div class="size-hero">
-              <span>Suggested position</span>
-              <strong id="positionUnits">—</strong>
-              <small>shares / contracts / units</small>
+            <div class="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Kelly level</th>
+                    <th>Suggested allocation</th>
+                    <th>Suggested bet</th>
+                    <th>Units</th>
+                    <th>Actual capital used</th>
+                    <th>1R / avg loss</th>
+                    <th>Avg winner</th>
+                  </tr>
+                </thead>
+                <tbody id="sizeResultsBody">
+                  <tr><td colspan="7" class="empty-cell">Calculate a position to see results.</td></tr>
+                </tbody>
+              </table>
             </div>
-
-            <div class="result-list">
-              <div><span>Payoff ratio</span><strong id="sizePayoffRatio">—</strong></div>
-              <div><span>Full Kelly</span><strong id="sizeFullKelly">—</strong></div>
-              <div><span>Actual risk after rounding</span><strong id="sizeAppliedRisk">—</strong></div>
-              <div><span>Dollar risk</span><strong id="sizeDollarRisk">—</strong></div>
-              <div><span>Risk per unit</span><strong id="riskPerUnit">—</strong></div>
-              <div><span>Position value at entry</span><strong id="positionNotional">—</strong></div>
-              <div><span>Notional / equity</span><strong id="positionLeverage">—</strong></div>
-              <div><span>Expected value per trade</span><strong id="expectedValueTrade">—</strong></div>
-              <div><span>Average winning trade</span><strong id="averageWinDollars">—</strong></div>
-            </div>
-
-            <div class="risk-callout">
-              <strong>Practical rule</strong>
-              <p>Kelly is an upper-bound growth model. Fractional Kelly is generally more practical than using full Kelly, but it can still recommend very large risk when the estimated edge is strong.</p>
-            </div>
+            <div id="sizeExplanation" class="summary-text">Kelly determines the capital allocation. Your average losing-trade percentage determines the dollar value of 1R.</div>
           </section>
         </div>
       </section>
 
-      <section id="method" class="tab-panel">
-        <div class="method-grid">
-          <article class="card prose-card">
-            <p class="eyebrow">FORMULA</p>
-            <h3>What the calculator is doing</h3>
-            <p>For win probability <em>p</em>, loss probability <em>q = 1 − p</em>, and payoff ratio <em>b = average win ÷ average loss</em>:</p>
-            <div class="formula">Full Kelly = (b × p − q) ÷ b</div>
-            <p>The result is the theoretical fraction of account equity to risk when a normal losing trade loses one unit of risk.</p>
-          </article>
-
-          <article class="card prose-card">
-            <p class="eyebrow">INTERPRETATION</p>
-            <h3>A 15% winner does not mean risking 15%</h3>
-            <p>If your average stock winner is 15% and your average loser is 10%, the payoff ratio is 1.5 to 1. The selected Kelly fraction determines account risk, and an average win changes the account by that risk percentage multiplied by 1.5.</p>
-            <div class="formula">Win impact = account risk × payoff ratio</div>
-          </article>
-
-          <article class="card prose-card">
-            <p class="eyebrow">TIME ESTIMATE</p>
-            <h3>How the goal timeline is calculated</h3>
-            <p>Each simulated trade is randomly recorded as a win or loss using your win rate. Equity compounds after every result. The app records the first trade on which each path reaches the target, then converts those trades into calendar time using your trades per week.</p>
-            <p>The most likely time is the median of successful simulated paths. Faster and slower estimates show the 25th and 75th percentiles.</p>
-          </article>
-
-          <article class="card prose-card">
-            <p class="eyebrow">AUTOMATIC SETTINGS</p>
-            <h3>Why seed and maximum trades were removed</h3>
-            <p>A random seed is only a technical tool used to reproduce the exact same random sequence. It does not describe your strategy, so the app now creates it automatically from your inputs.</p>
-            <p>A simulation still needs a safety horizon, but the app now calculates one automatically and shows it in the results instead of asking you to choose an arbitrary maximum-trades number.</p>
-          </article>
-
-          <article class="card prose-card warning-card">
-            <p class="eyebrow">LIMITATIONS</p>
-            <h3>What Kelly does not know</h3>
-            <p>Real trades are not perfectly independent. Slippage, gaps, changing volatility, strategy decay, correlated positions, taxes, fees, and estimation error can all make realized results worse than the model.</p>
-            <p>Use historical data across enough trades, test different market regimes, and treat the output as a range rather than a promise.</p>
-          </article>
-        </div>
+      <section id="methodPanel" class="panel">
+        <section class="card method-card">
+          <p class="eyebrow">MODEL DEFINITION</p>
+          <h3>What the app calculates</h3>
+          <div class="method-grid">
+            <article><h4>Kelly allocation</h4><p>The calculator maximizes expected logarithmic account growth using your win probability and percentage return on winning and losing positions.</p></article>
+            <article><h4>No leverage</h4><p>If the formula suggests placing more than the account balance into a trade, the app uses 100% of equity. It does not display or model borrowed capital.</p></article>
+            <article><h4>Dollar R</h4><p>1R equals the suggested bet amount multiplied by the average losing-trade percentage. A $100,000 bet with a 5% average loss has a $5,000 R.</p></article>
+            <article><h4>Risk of ruin</h4><p>Risk of ruin is the percentage of simulated paths that touch your chosen dollar threshold before reaching the target within the selected horizon.</p></article>
+          </div>
+          <div class="warning-box"><strong>Important:</strong> The model assumes your win rate and average win/loss remain stable, trades are independent, and every outcome equals the entered average. Real results include dispersion, slippage, gaps, changing market regimes, and correlation.</div>
+        </section>
       </section>
     </main>
-
-    <footer>
-      <p>KellyLab is an educational modeling tool, not financial advice. Estimates are hypothetical and depend entirely on the assumptions entered.</p>
-    </footer>
   </div>
 
+  <script src="kelly-core.js"></script>
   <script src="app.js"></script>
 </body>
 </html>

@@ -1,71 +1,67 @@
-# KellyLab
+# KellyLab V4
 
-KellyLab is a static GitHub Pages app with two trading tools:
+A static GitHub Pages app that calculates Kelly allocation using actual trading returns.
 
-1. **Goal Simulator** — uses Monte Carlo simulation to estimate the median, faster, and slower time needed to grow from a starting account value to a target value.
-2. **Kelly Size Calculator** — converts win rate, payoff ratio, account equity, entry price, and stop price into a fractional-Kelly position size.
+## Inputs
 
-The app uses only HTML, CSS, and JavaScript. There is no server, database, build process, API key, or external dependency.
+Both calculators use:
 
-## Current version fixes
+- Win rate
+- Average winning trade as a percentage return on the position
+- Average losing trade as a positive percentage loss on the position
 
-- All dollar inputs display comma separators, including starting capital, target capital, account equity, entry price, and stop price.
-- Currency values with commas are parsed correctly by both calculators.
-- Removed the browser step mismatch that produced “nearest valid values” errors.
-- Removed the risk-cap option and all risk-cap logic from both calculators.
-- Fractional Kelly is now the only risk adjustment: full, half, quarter, or one-tenth Kelly.
-- Removed the user-facing random seed and manual maximum-trades input.
-- The simulator creates a repeatable internal seed and automatic safety horizon.
-- Fixed the Estimate Time to Goal button so it no longer references removed form fields.
-- The goal results emphasize median time, faster/slower ranges, one/three/five-year probabilities, and drawdown risk.
-- The sizing calculator reports actual risk after unit rounding rather than overstating the planned risk.
+Example:
 
-## Launch locally
+- Win rate: 60%
+- Average winner: 10%
+- Average loser: 5%
 
-Open `index.html` directly, or run:
+The app does **not** interpret this as a 2R winner that doubles the account. It treats a fully funded position as +10% on a winner and -5% on a loser.
 
-```bash
-python -m http.server 8000
-```
+## Kelly calculation
 
-Then open `http://localhost:8000`.
-
-## Update an existing GitHub repository
-
-Replace the existing files in the repository root with:
-
-- `index.html`
-- `styles.css`
-- `app.js`
-- `README.md`
-
-Then commit the changes. GitHub Pages should redeploy automatically.
-
-Using Git:
-
-```bash
-git add index.html styles.css app.js README.md
-git commit -m "Remove risk cap and fix Kelly calculators"
-git push origin main
-```
-
-## Kelly formula
+For win probability `p`, loss probability `q`, winning position return `G`, and losing position return `L`, the unconstrained Kelly allocation is:
 
 ```text
-Payoff ratio b = average winner / average loser
-Full Kelly f* = (b × p − q) / b
-Applied Kelly risk = Full Kelly × selected Kelly fraction
+(pG - qL) / (GL)
 ```
 
-There is no risk cap in this version. For example, if Full Kelly is 25%:
+This app has no leverage mode. Any suggested allocation above 100% is limited to the available account equity. It does not show leverage ratios or borrowed-capital scenarios.
+
+## 1R definition
+
+In this app:
 
 ```text
-Full Kelly       = 25.00% account risk
-Half Kelly       = 12.50% account risk
-Quarter Kelly    = 6.25% account risk
-One-tenth Kelly  = 2.50% account risk
+1R = suggested bet amount × average losing trade percentage
 ```
 
-## Important limitation
+A $100,000 suggested bet and a 5% average loss produces a $5,000 R.
 
-The model assumes a stable win rate and payoff ratio, independent trades, immediate stop execution, and no fees, taxes, gaps, slippage, correlation, or strategy decay. Kelly can recommend extremely aggressive sizing when the estimated edge is high. The output is hypothetical, not financial advice or a guarantee.
+## Goal simulator
+
+The goal simulator automatically models full, half, and quarter Kelly and reports:
+
+- Suggested allocation and starting dollar bet
+- Starting 1R
+- Median trades and calendar time to target
+- Probability of reaching the target within the selected horizon
+- Risk of touching the chosen ruin threshold first
+- Median maximum drawdown
+- Sample account paths
+
+The simulation assumes independent trades and two possible outcomes: the entered average winner or the entered average loser. Correlation is not modeled.
+
+## GitHub Pages
+
+Upload these files together to the root of the repository:
+
+```text
+index.html
+styles.css
+kelly-core.js
+app.js
+README.md
+```
+
+Then go to **Settings → Pages**, choose **Deploy from a branch**, select `main` and `/(root)`, and save.
