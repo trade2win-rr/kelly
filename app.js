@@ -1,8 +1,17 @@
 "use strict";
 
 const $ = (id) => document.getElementById(id);
-const money0 = new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 0 });
-const money2 = new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", minimumFractionDigits: 2, maximumFractionDigits: 2 });
+const money0 = new Intl.NumberFormat("en-US", {
+  style: "currency",
+  currency: "USD",
+  maximumFractionDigits: 0
+});
+const money2 = new Intl.NumberFormat("en-US", {
+  style: "currency",
+  currency: "USD",
+  minimumFractionDigits: 2,
+  maximumFractionDigits: 2
+});
 const number0 = new Intl.NumberFormat("en-US", { maximumFractionDigits: 0 });
 
 const defaults = {
@@ -13,7 +22,6 @@ const defaults = {
     simAvgWin: 1.5,
     simAvgLoss: 1,
     simKellyScale: 0.25,
-    simRiskCap: 2,
     tradesPerWeek: 10,
     simulationCount: 5000
   },
@@ -23,7 +31,6 @@ const defaults = {
     sizeAvgWin: 1.5,
     sizeAvgLoss: 1,
     sizeKellyScale: 0.25,
-    sizeRiskCap: 1,
     entryPrice: 100,
     stopPrice: 95,
     unitMultiplier: 1,
@@ -32,15 +39,96 @@ const defaults = {
 };
 
 let latestSimulationRows = [];
-let latestChartState = null;
+let lastChartData = null;
+
+function safeStorageGet(key, fallback = null) {
+  try {
+    return window.localStorage.getItem(key) ?? fallback;
+  } catch {
+    return fallback;
+  }
+}
+
+function safeStorageSet(key, value) {
+  try {
+    window.localStorage.setItem(key, value);
+  } catch {
+    // The calculators still work when storage is unavailable.
+  }
+}
 
 function clamp(value, min, max) {
   return Math.min(Math.max(value, min), max);
 }
 
-function percentile(sortedValues, probability) {
+function parseMoney(value) {
+  const cleaned = String(value ?? "")
+    .replace(/[$,\s]/g, "")
+    .replace(/[^0-9.-]/g, "");
+  const parsed = Number(cleaned);
+  return Number.isFinite(parsed) ? parsed : NaN;
+}
+
+function formatMoneyInputValue(value, maxDecimals = 0, minDecimals = 0, forceMinDecimals = false) {
+  const raw = String(value ?? "").replace(/[$,\s]/g, "").replace(/[^0-9.]/g, "");
+  if (!raw) return "";
+
+  const firstDot = raw.indexOf(".");
+  const hasDecimal = firstDot >= 0;
+  let integerPart = hasDecimal ? raw.slice(0, firstDot) : raw;
+  let decimalPart = hasDecimal ? raw.slice(firstDot + 1).replace(/\./g, "") : "";
+
+  integerPart = integerPart.replace(/^0+(?=\d)/, "") || "0";
+  decimalPart = decimalPart.slice(0, maxDecimals);
+
+  const groupedInteger = Number(integerPart).toLocaleString("en-US", { maximumFractionDigits: 0 });
+  if (maxDecimals === 0) return groupedInteger;
+
+  if (forceMinDecimals) {
+    decimalPart = decimalPart.padEnd(minDecimals, "0");
+  }
+
+  if (hasDecimal || decimalPart.length > 0 || forceMinDecimals) {
+    return `${groupedInteger}.${decimalPart}`;
+  }
+  return groupedInteger;
+}
+
+function formatMoneyInput(element, forceMinDecimals = false) {
+  const maxDecimals = Number(element.dataset.maxDecimals || 0);
+  const minDecimals = Number(element.dataset.minDecimals || 0);
+  element.value = formatMoneyInputValue(element.value, maxDecimals, minDecimals, forceMinDecimals);
+}
+
+function initializeMoneyInputs() {
+  document.querySelectorAll(".money-input").forEach((element) => {
+    formatMoneyInput(element, true);
+
+    element.addEventListener("input", () => {
+      const oldValue = element.value;
+      const oldCursor = element.selectionStart ?? oldValue.length;
+      const digitsRight = oldValue.slice(oldCursor).replace(/\D/g, "").length;
+      formatMoneyInput(element, false);
+
+      let cursor = element.value.length;
+      let remaining = digitsRight;
+      while (cursor > 0 && remaining > 0) {
+        cursor -= 1;
+        if (/\d/.test(element.value[cursor])) remaining -= 1;
+      }
+      element.setSelectionRange(cursor, cursor);
+    });
+
+    element.addEventListener("blur", () => {
+      formatMoneyInput(element, true);
+      saveInputs();
+    });
+  });
+}
+
+function percentile(sortedValues, p) {
   if (!sortedValues.length) return null;
-  const index = (sortedValues.length - 1) * probability;
+  const index = (sortedValues.length - 1) * p;
   const lower = Math.floor(index);
   const upper = Math.ceil(index);
   if (lower === upper) return sortedValues[lower];
@@ -48,75 +136,22 @@ function percentile(sortedValues, probability) {
   return sortedValues[lower] * (1 - weight) + sortedValues[upper] * weight;
 }
 
-function parseNumericValue(value) {
-  if (typeof value !== "string") return Number(value);
-  const cleaned = value.replace(/[$,\s]/g, "");
-  return cleaned === "" ? NaN : Number(cleaned);
+function formatDurationFromTrades(trades, tradesPerWeek) {
+  if (!Number.isFinite(trades) || tradesPerWeek <= 0) return "—";
+  const weeks = trades / tradesPerWeek;
+  if (weeks < 2) return `${Math.max(1, Math.round(weeks * 7))} days`;
+  if (weeks < 12) return `${weeks.toFixed(1)} weeks`;
+  const months = weeks / 4.345;
+  if (months < 24) return `${months.toFixed(1)} months`;
+  return `${(weeks / 52.143).toFixed(1)} years`;
 }
 
-function valueOf(id) {
-  return parseNumericValue($(id).value);
-}
-
-function formatCurrencyNumber(value, maxDecimals = 0, minDecimals = 0) {
-  if (!Number.isFinite(value)) return "";
-  return new Intl.NumberFormat("en-US", {
-    minimumFractionDigits: minDecimals,
-    maximumFractionDigits: maxDecimals
-  }).format(value);
-}
-
-function editableCurrency(raw, maxDecimals) {
-  const source = String(raw ?? "");
-  const hadDecimal = source.includes(".");
-  const trailingDecimal = hadDecimal && source.trim().endsWith(".");
-  const cleaned = source.replace(/[^\d.]/g, "");
-  const pieces = cleaned.split(".");
-  let integerPart = pieces.shift() || "";
-  let decimalPart = pieces.join("").slice(0, maxDecimals);
-
-  integerPart = integerPart.replace(/^0+(?=\d)/, "");
-  if (integerPart === "" && (hadDecimal || decimalPart)) integerPart = "0";
-  const formattedInteger = integerPart.replace(/\B(?=(\d{3})+(?!\d))/g, ",");
-
-  if (maxDecimals > 0 && hadDecimal) {
-    return `${formattedInteger || "0"}.${decimalPart}`;
-  }
-  if (maxDecimals > 0 && trailingDecimal) return `${formattedInteger || "0"}.`;
-  return formattedInteger;
-}
-
-function countEditableCharacters(text) {
-  return (text.match(/[\d.]/g) || []).length;
-}
-
-function formatMoneyWhileTyping(input) {
-  const oldValue = input.value;
-  const oldCaret = input.selectionStart ?? oldValue.length;
-  const significantBeforeCaret = countEditableCharacters(oldValue.slice(0, oldCaret));
-  const maxDecimals = Number(input.dataset.maxDecimals || 0);
-  const formatted = editableCurrency(oldValue, maxDecimals);
-  input.value = formatted;
-
-  if (document.activeElement !== input) return;
-  let seen = 0;
-  let newCaret = formatted.length;
-  for (let i = 0; i < formatted.length; i += 1) {
-    if (/[\d.]/.test(formatted[i])) seen += 1;
-    if (seen >= significantBeforeCaret) {
-      newCaret = i + 1;
-      break;
-    }
-  }
-  input.setSelectionRange(newCaret, newCaret);
-}
-
-function finalizeMoneyInput(input) {
-  const value = parseNumericValue(input.value);
-  if (!Number.isFinite(value)) return;
-  const maxDecimals = Number(input.dataset.maxDecimals || 0);
-  const minDecimals = Number(input.dataset.minDecimals || 0);
-  input.value = formatCurrencyNumber(value, maxDecimals, minDecimals);
+function formatAxisDuration(trades, tradesPerWeek) {
+  const weeks = trades / tradesPerWeek;
+  if (weeks < 12) return `${weeks.toFixed(0)}w`;
+  const months = weeks / 4.345;
+  if (months < 24) return `${months.toFixed(0)}mo`;
+  return `${(weeks / 52.143).toFixed(1)}y`;
 }
 
 function calculateKelly(winRatePct, avgWin, avgLoss) {
@@ -124,60 +159,36 @@ function calculateKelly(winRatePct, avgWin, avgLoss) {
   const q = 1 - p;
   const payoffRatio = avgWin / avgLoss;
   const expectancy = p * payoffRatio - q;
-  const rawKelly = payoffRatio > 0 ? expectancy / payoffRatio : 0;
+  const rawKelly = payoffRatio > 0 ? (payoffRatio * p - q) / payoffRatio : 0;
   return {
     p,
     q,
     payoffRatio,
     expectancy,
-    rawKelly,
-    fullKelly: Math.max(0, rawKelly)
+    fullKelly: Math.max(0, rawKelly),
+    rawKelly
   };
 }
 
-function expectedLogGrowth(p, payoffRatio, riskFraction) {
-  if (riskFraction <= 0 || riskFraction >= 1) return Number.NEGATIVE_INFINITY;
-  return p * Math.log1p(riskFraction * payoffRatio) + (1 - p) * Math.log1p(-riskFraction);
-}
-
-function hashInputs(values) {
-  const source = JSON.stringify(values);
-  let hash = 2166136261;
-  for (let i = 0; i < source.length; i += 1) {
-    hash ^= source.charCodeAt(i);
-    hash = Math.imul(hash, 16777619);
-  }
-  return hash >>> 0;
-}
-
 function mulberry32(seed) {
-  let state = seed >>> 0;
+  let a = seed >>> 0;
   return function random() {
-    state |= 0;
-    state = (state + 0x6D2B79F5) | 0;
-    let t = Math.imul(state ^ (state >>> 15), 1 | state);
+    a |= 0;
+    a = (a + 0x6D2B79F5) | 0;
+    let t = Math.imul(a ^ (a >>> 15), 1 | a);
     t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
     return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
   };
 }
 
-function formatDurationFromTrades(trades, tradesPerWeek) {
-  if (!Number.isFinite(trades) || tradesPerWeek <= 0) return "—";
-  const weeks = trades / tradesPerWeek;
-  if (weeks < 2) return `${Math.max(1, Math.round(weeks * 7))} days`;
-  if (weeks < 13) return `${weeks.toFixed(1)} weeks`;
-  const months = weeks / 4.345;
-  if (months < 24) return `${months.toFixed(1)} months`;
-  return `${(weeks / 52.143).toFixed(1)} years`;
-}
-
-function formatCompactDurationFromTrades(trades, tradesPerWeek) {
-  if (!Number.isFinite(trades) || tradesPerWeek <= 0) return "—";
-  const weeks = trades / tradesPerWeek;
-  if (weeks < 13) return `${Math.max(1, Math.round(weeks))} wk`;
-  const years = weeks / 52.143;
-  if (years < 2) return `${(weeks / 4.345).toFixed(0)} mo`;
-  return `${years.toFixed(years < 10 ? 1 : 0)} yr`;
+function hashInputs(values) {
+  const text = JSON.stringify(values);
+  let hash = 2166136261;
+  for (let i = 0; i < text.length; i += 1) {
+    hash ^= text.charCodeAt(i);
+    hash = Math.imul(hash, 16777619);
+  }
+  return hash >>> 0;
 }
 
 function showMessage(element, text, type = "error") {
@@ -195,7 +206,7 @@ function setFormValues(group) {
     const element = $(id);
     if (!element) return;
     element.value = String(value);
-    if (element.classList.contains("money-input")) finalizeMoneyInput(element);
+    if (element.classList.contains("money-input")) formatMoneyInput(element, true);
   });
 }
 
@@ -203,45 +214,55 @@ function saveInputs() {
   const ids = [...Object.keys(defaults.simulator), ...Object.keys(defaults.sizer)];
   const saved = {};
   ids.forEach((id) => {
-    if ($(id)) saved[id] = $(id).value;
+    const element = $(id);
+    if (element) saved[id] = element.value;
   });
-  localStorage.setItem("kellyLabInputsV2", JSON.stringify(saved));
+  safeStorageSet("kellyLabInputs", JSON.stringify(saved));
 }
 
 function loadInputs() {
-  const saved = JSON.parse(localStorage.getItem("kellyLabInputsV2") || "{}");
+  let saved = {};
+  try {
+    saved = JSON.parse(safeStorageGet("kellyLabInputs", "{}") || "{}");
+  } catch {
+    saved = {};
+  }
+
   Object.entries(saved).forEach(([id, value]) => {
-    if ($(id)) $(id).value = value;
+    const element = $(id);
+    if (element) element.value = value;
   });
-  document.querySelectorAll(".money-input").forEach(finalizeMoneyInput);
 }
 
 function updateHeroFromSimulator() {
-  const kelly = calculateKelly(valueOf("simWinRate"), valueOf("simAvgWin"), valueOf("simAvgLoss"));
-  const scale = valueOf("simKellyScale");
-  const cap = valueOf("simRiskCap") / 100;
-  const applied = Math.min(kelly.fullKelly * scale, cap);
+  const kelly = calculateKelly(
+    Number($("simWinRate").value),
+    Number($("simAvgWin").value),
+    Number($("simAvgLoss").value)
+  );
+  const scale = Number($("simKellyScale").value);
+  const applied = kelly.fullKelly * scale;
 
   $("heroKelly").textContent = Number.isFinite(kelly.fullKelly) ? `${(kelly.fullKelly * 100).toFixed(1)}%` : "—";
   $("heroRisk").textContent = Number.isFinite(applied) ? `${(applied * 100).toFixed(1)}%` : "—";
   $("heroExpectancy").textContent = Number.isFinite(kelly.expectancy) ? `${kelly.expectancy.toFixed(2)}R` : "—";
 }
 
-function chooseAutomaticHorizon(values, kelly, riskFraction) {
-  const logGrowth = expectedLogGrowth(kelly.p, kelly.payoffRatio, riskFraction);
-  const logGoal = Math.log(values.target / values.start);
-  const roughTrades = logGrowth > 0 ? logGoal / logGrowth : Number.POSITIVE_INFINITY;
-  const minimumCalendarTrades = values.tradesPerWeek * 52.143 * 10;
-  const desiredTrades = Math.ceil(Math.max(500, minimumCalendarTrades, roughTrades * 10));
-  const operationLimit = 65000000;
-  const operationCappedTrades = Math.max(500, Math.floor(operationLimit / values.simulations));
-  const maxTrades = Math.floor(clamp(desiredTrades, 500, Math.min(100000, operationCappedTrades)));
-
+function estimateAutomaticHorizon(values, kelly, riskFraction) {
+  const winMultiplier = 1 + riskFraction * kelly.payoffRatio;
+  const lossMultiplier = 1 - riskFraction;
+  const expectedLogGrowth = kelly.p * Math.log(winMultiplier) + kelly.q * Math.log(lossMultiplier);
+  const goalLog = Math.log(values.target / values.start);
+  const expectedTrades = expectedLogGrowth > 0 ? goalLog / expectedLogGrowth : Infinity;
+  const fiveYearsOfTrades = Math.ceil(values.tradesPerWeek * 52.143 * 5);
+  const desired = Math.max(500, fiveYearsOfTrades, Number.isFinite(expectedTrades) ? Math.ceil(expectedTrades * 6) : 5000);
+  const operationLimit = 60000000;
+  const browserCap = Math.max(500, Math.floor(operationLimit / values.simulations));
   return {
-    maxTrades,
-    roughTrades,
-    logGrowth,
-    wasOperationCapped: maxTrades < desiredTrades
+    maxTrades: clamp(desired, 500, browserCap),
+    expectedTrades,
+    expectedLogGrowth,
+    fiveYearCoverage: browserCap >= fiveYearsOfTrades
   };
 }
 
@@ -250,15 +271,13 @@ function simulatePath({ start, target, p, payoffRatio, riskFraction, maxTrades, 
   let peak = start;
   let maxDrawdown = 0;
   let reached = start >= target;
-  let tradesToTarget = reached ? 0 : null;
-  let endingTrade = 0;
+  let trades = reached ? 0 : maxTrades;
   let touchedHalfDrawdown = false;
   const points = capturePath ? [{ trade: 0, equity }] : null;
-  const samplingStep = Math.max(1, Math.floor(maxTrades / 320));
+  const samplingStep = Math.max(1, Math.floor(maxTrades / 250));
 
   for (let trade = 1; trade <= maxTrades && !reached; trade += 1) {
     equity *= rng() < p ? 1 + riskFraction * payoffRatio : 1 - riskFraction;
-    endingTrade = trade;
 
     if (equity > peak) peak = equity;
     const drawdown = peak > 0 ? 1 - equity / peak : 1;
@@ -271,100 +290,98 @@ function simulatePath({ start, target, p, payoffRatio, riskFraction, maxTrades, 
 
     if (equity >= target) {
       reached = true;
-      tradesToTarget = trade;
+      trades = trade;
     }
 
-    if (!Number.isFinite(equity) || equity <= 0) {
+    if (!Number.isFinite(equity) || equity <= 0.000001) {
       equity = 0;
+      trades = trade;
       break;
     }
   }
 
-  if (capturePath && points[points.length - 1].trade !== endingTrade) {
-    points.push({ trade: endingTrade, equity });
-  }
-
-  return {
-    reached,
-    tradesToTarget,
-    endingTrade,
-    endingEquity: equity,
-    maxDrawdown,
-    touchedHalfDrawdown,
-    points
-  };
+  return { reached, trades, endingEquity: equity, maxDrawdown, touchedHalfDrawdown, points };
 }
 
 function validateSimulatorInputs(values) {
-  if (!Number.isFinite(values.start) || values.start <= 0) return "Enter a valid starting capital greater than $0.";
-  if (!Number.isFinite(values.target) || values.target <= values.start) return "Target capital must be greater than starting capital.";
-  if (!Number.isFinite(values.winRate) || values.winRate <= 0 || values.winRate >= 100) return "Win rate must be greater than 0% and below 100%.";
-  if (!Number.isFinite(values.avgWin) || values.avgWin <= 0) return "Average winner must be greater than 0.";
-  if (!Number.isFinite(values.avgLoss) || values.avgLoss <= 0) return "Average loser must be greater than 0.";
-  if (!Number.isFinite(values.riskCap) || values.riskCap <= 0 || values.riskCap >= 100) return "Maximum account risk must be greater than 0% and below 100%.";
-  if (!Number.isFinite(values.tradesPerWeek) || values.tradesPerWeek <= 0) return "Average trades per week must be greater than 0.";
-  if (!Number.isFinite(values.simulations) || values.simulations < 100) return "Choose at least 100 simulations.";
+  if (!Number.isFinite(values.start) || !Number.isFinite(values.target) || values.start <= 0 || values.target <= 0) {
+    return "Starting and target capital must be positive dollar amounts.";
+  }
+  if (values.target <= values.start) return "Target capital must be greater than starting capital.";
+  if (values.winRate <= 0 || values.winRate >= 100) return "Win rate must be between 0% and 100%.";
+  if (values.avgWin <= 0 || values.avgLoss <= 0) return "Average winner and loser must be positive.";
+  if (![1, 0.5, 0.25, 0.1].includes(values.kellyScale)) return "Select a valid Kelly fraction.";
+  if (values.simulations < 1) return "Number of simulations must be positive.";
+  if (values.tradesPerWeek <= 0) return "Average trades per week must be positive.";
   return null;
 }
 
-function probabilityWithin(results, tradeLimit) {
-  return results.filter((result) => result.reached && result.tradesToTarget <= tradeLimit).length / results.length;
+function readSimulatorValues() {
+  return {
+    start: parseMoney($("startCapital").value),
+    target: parseMoney($("targetCapital").value),
+    winRate: Number($("simWinRate").value),
+    avgWin: Number($("simAvgWin").value),
+    avgLoss: Number($("simAvgLoss").value),
+    kellyScale: Number($("simKellyScale").value),
+    simulations: Number($("simulationCount").value),
+    tradesPerWeek: Number($("tradesPerWeek").value)
+  };
 }
 
 function runSimulation(event) {
   if (event) event.preventDefault();
   hideMessage($("simulatorMessage"));
 
-  const values = {
-    start: valueOf("startCapital"),
-    target: valueOf("targetCapital"),
-    winRate: valueOf("simWinRate"),
-    avgWin: valueOf("simAvgWin"),
-    avgLoss: valueOf("simAvgLoss"),
-    kellyScale: valueOf("simKellyScale"),
-    riskCap: valueOf("simRiskCap"),
-    tradesPerWeek: valueOf("tradesPerWeek"),
-    simulations: valueOf("simulationCount")
-  };
-
+  const values = readSimulatorValues();
   const validationError = validateSimulatorInputs(values);
   if (validationError) {
     showMessage($("simulatorMessage"), validationError);
-    clearSimulationResults();
     return;
   }
 
   const kelly = calculateKelly(values.winRate, values.avgWin, values.avgLoss);
-  if (!Number.isFinite(kelly.rawKelly) || kelly.rawKelly <= 0) {
-    showMessage($("simulatorMessage"), "These assumptions do not produce a positive Kelly edge. Increase the win rate, improve the payoff ratio, or reduce the average loss.", "warning");
+  if (kelly.rawKelly <= 0) {
+    showMessage($("simulatorMessage"), "These inputs do not produce a positive Kelly edge. The Kelly allocation is 0%, so no growth simulation was run.", "warning");
     clearSimulationResults();
     updateHeroFromSimulator();
     return;
   }
 
-  const riskFraction = Math.min(kelly.fullKelly * values.kellyScale, values.riskCap / 100);
-  if (!Number.isFinite(riskFraction) || riskFraction <= 0 || riskFraction >= 1) {
-    showMessage($("simulatorMessage"), "The calculated account risk is invalid. Check the Kelly fraction and risk limit.");
+  const riskFraction = kelly.fullKelly * values.kellyScale;
+  if (riskFraction <= 0 || riskFraction >= 1) {
+    showMessage($("simulatorMessage"), "The selected fractional-Kelly risk must be greater than 0% and below 100%.", "warning");
     clearSimulationResults();
     return;
   }
 
-  const horizon = chooseAutomaticHorizon(values, kelly, riskFraction);
-  if (!Number.isFinite(horizon.logGrowth) || horizon.logGrowth <= 0) {
-    showMessage($("simulatorMessage"), "These assumptions have non-positive compounded growth at the selected risk level, so a reliable time-to-goal estimate cannot be produced.", "warning");
-    clearSimulationResults();
-    return;
-  }
+  const submitButton = $("simulatorForm").querySelector('button[type="submit"]');
+  const originalLabel = submitButton.textContent;
+  submitButton.disabled = true;
+  submitButton.textContent = "Running simulation…";
 
+  window.setTimeout(() => {
+    try {
+      executeSimulation(values, kelly, riskFraction);
+    } catch (error) {
+      console.error(error);
+      showMessage($("simulatorMessage"), "The simulation could not run. Refresh the page and try again.");
+    } finally {
+      submitButton.disabled = false;
+      submitButton.textContent = originalLabel;
+    }
+  }, 0);
+}
+
+function executeSimulation(values, kelly, riskFraction) {
+  const horizon = estimateAutomaticHorizon(values, kelly, riskFraction);
   const seed = hashInputs({ ...values, riskFraction, maxTrades: horizon.maxTrades });
   const rng = mulberry32(seed);
   const results = [];
   const samplePaths = [];
-  const sampleCount = Math.min(30, values.simulations);
-  const sampleEvery = Math.max(1, Math.floor(values.simulations / sampleCount));
+  const sampleCount = Math.min(28, values.simulations);
 
-  for (let index = 0; index < values.simulations; index += 1) {
-    const capturePath = index % sampleEvery === 0 && samplePaths.length < sampleCount;
+  for (let i = 0; i < values.simulations; i += 1) {
     const result = simulatePath({
       start: values.start,
       target: values.target,
@@ -373,96 +390,88 @@ function runSimulation(event) {
       riskFraction,
       maxTrades: horizon.maxTrades,
       rng,
-      capturePath
+      capturePath: i < sampleCount
     });
     results.push(result);
-    if (result.points) samplePaths.push(result);
+    if (result.points) samplePaths.push({ points: result.points, reached: result.reached, trades: result.trades });
   }
 
-  const successfulTrades = results
-    .filter((result) => result.reached)
-    .map((result) => result.tradesToTarget)
-    .sort((a, b) => a - b);
+  const successfulTrades = results.filter((result) => result.reached).map((result) => result.trades).sort((a, b) => a - b);
   const drawdowns = results.map((result) => result.maxDrawdown).sort((a, b) => a - b);
   const reachedProbability = successfulTrades.length / results.length;
   const deepDrawdownRisk = results.filter((result) => result.touchedHalfDrawdown).length / results.length;
-
-  const medianTrades = percentile(successfulTrades, 0.5);
+  const medianSuccessfulTrades = percentile(successfulTrades, 0.5);
   const fastTrades = percentile(successfulTrades, 0.25);
   const slowTrades = percentile(successfulTrades, 0.75);
-  const oneYearTrades = values.tradesPerWeek * 52.143;
-  const threeYearTrades = oneYearTrades * 3;
-  const fiveYearTrades = oneYearTrades * 5;
 
-  $("medianTime").textContent = medianTrades === null ? "Not reached" : formatDurationFromTrades(medianTrades, values.tradesPerWeek);
-  $("fastTime").textContent = fastTrades === null ? "—" : formatDurationFromTrades(fastTrades, values.tradesPerWeek);
-  $("slowTime").textContent = slowTrades === null ? "—" : formatDurationFromTrades(slowTrades, values.tradesPerWeek);
-  $("medianTrades").textContent = medianTrades === null ? "—" : number0.format(Math.round(medianTrades));
-  $("chanceOneYear").textContent = `${(probabilityWithin(results, oneYearTrades) * 100).toFixed(1)}%`;
-  $("chanceThreeYears").textContent = `${(probabilityWithin(results, threeYearTrades) * 100).toFixed(1)}%`;
-  $("chanceFiveYears").textContent = `${(probabilityWithin(results, fiveYearTrades) * 100).toFixed(1)}%`;
+  const tradesInYears = (years) => values.tradesPerWeek * 52.143 * years;
+  const chanceWithin = (years) => results.filter((result) => result.reached && result.trades <= tradesInYears(years)).length / results.length;
+
+  $("medianTime").textContent = successfulTrades.length ? formatDurationFromTrades(medianSuccessfulTrades, values.tradesPerWeek) : "Not reached";
+  $("fastTime").textContent = successfulTrades.length ? formatDurationFromTrades(fastTrades, values.tradesPerWeek) : "—";
+  $("slowTime").textContent = successfulTrades.length ? formatDurationFromTrades(slowTrades, values.tradesPerWeek) : "—";
+  $("medianTrades").textContent = successfulTrades.length ? number0.format(Math.round(medianSuccessfulTrades)) : "—";
+  $("chanceOneYear").textContent = `${(chanceWithin(1) * 100).toFixed(1)}%`;
+  $("chanceThreeYears").textContent = `${(chanceWithin(3) * 100).toFixed(1)}%`;
+  $("chanceFiveYears").textContent = horizon.maxTrades >= tradesInYears(5) ? `${(chanceWithin(5) * 100).toFixed(1)}%` : "Not covered";
   $("reachProbability").textContent = `${(reachedProbability * 100).toFixed(1)}%`;
+  $("reachProbabilityNote").textContent = `within ${number0.format(horizon.maxTrades)} trades`;
   $("medianDrawdown").textContent = `${(percentile(drawdowns, 0.5) * 100).toFixed(1)}%`;
   $("deepDrawdownRisk").textContent = `${(deepDrawdownRisk * 100).toFixed(1)}%`;
-
-  const winImpact = riskFraction * kelly.payoffRatio;
-  $("appliedRiskResult").textContent = `${(riskFraction * 100).toFixed(2)}%`;
-  $("winImpactResult").textContent = `+${(winImpact * 100).toFixed(2)}%`;
+  $("appliedRiskResult").textContent = `${(riskFraction * 100).toFixed(2)}% per trade`;
+  $("winImpactResult").textContent = `+${(riskFraction * kelly.payoffRatio * 100).toFixed(2)}%`;
   $("lossImpactResult").textContent = `−${(riskFraction * 100).toFixed(2)}%`;
-  $("automaticHorizonResult").textContent = formatDurationFromTrades(horizon.maxTrades, values.tradesPerWeek);
-  $("reachProbabilityNote").textContent = `within ${formatDurationFromTrades(horizon.maxTrades, values.tradesPerWeek)}`;
+  $("automaticHorizonResult").textContent = `${number0.format(horizon.maxTrades)} trades / ${formatDurationFromTrades(horizon.maxTrades, values.tradesPerWeek)}`;
 
-  const startText = money0.format(values.start);
-  const targetText = money0.format(values.target);
-  if (medianTrades !== null) {
-    $("simulationSummary").innerHTML = `At <strong>${number0.format(values.tradesPerWeek)} trades per week</strong> and <strong>${(riskFraction * 100).toFixed(2)}% account risk per trade</strong>, the median simulated path grew from <strong>${startText}</strong> to <strong>${targetText}</strong> in <strong>${formatDurationFromTrades(medianTrades, values.tradesPerWeek)}</strong> (${number0.format(Math.round(medianTrades))} trades). The middle half of successful outcomes ranged from <strong>${formatDurationFromTrades(fastTrades, values.tradesPerWeek)}</strong> to <strong>${formatDurationFromTrades(slowTrades, values.tradesPerWeek)}</strong>.`;
+  if (successfulTrades.length) {
+    const conditionalPhrase = reachedProbability < 0.999 ? "among paths that reached the goal" : "across the simulated paths";
+    $("simulationSummary").textContent = `Using ${(riskFraction * 100).toFixed(2)}% account risk per trade, the median result ${conditionalPhrase} reached ${money0.format(values.target)} in ${formatDurationFromTrades(medianSuccessfulTrades, values.tradesPerWeek)} (${number0.format(Math.round(medianSuccessfulTrades))} trades). ${
+      reachedProbability < 0.8 ? `Only ${(reachedProbability * 100).toFixed(1)}% of paths reached the target within the automatic horizon, so the time estimate is conditional and should be treated cautiously.` : ""
+    }`;
   } else {
-    $("simulationSummary").innerHTML = `None of the simulated paths reached <strong>${targetText}</strong> within the automatic horizon of <strong>${formatDurationFromTrades(horizon.maxTrades, values.tradesPerWeek)}</strong>. The edge may be too small, the target too distant, or the risk level too low for a useful estimate.`;
+    $("simulationSummary").textContent = `None of the ${number0.format(values.simulations)} paths reached ${money0.format(values.target)} within ${number0.format(horizon.maxTrades)} trades. The target may be unrealistic under these assumptions or require a longer horizon.`;
   }
 
-  if (reachedProbability < 0.8) {
-    showMessage($("simulatorMessage"), `Only ${(reachedProbability * 100).toFixed(1)}% of paths reached the target within the automatic ${formatDurationFromTrades(horizon.maxTrades, values.tradesPerWeek)} horizon. The displayed time range is conditional on paths that succeeded and should be treated cautiously.`, "warning");
-  } else if (horizon.wasOperationCapped) {
-    showMessage($("simulatorMessage"), "The automatic horizon was limited to keep the browser responsive. Increase the edge, risk level, or trading frequency if too few paths reach the goal.", "warning");
+  if (riskFraction >= 0.1) {
+    showMessage($("simulatorMessage"), `Your selected Kelly fraction risks ${(riskFraction * 100).toFixed(2)}% of the account on every trade. That can create very large drawdowns.`, "warning");
   }
 
   latestSimulationRows = results.map((result, index) => ({
     simulation: index + 1,
     reached_target: result.reached ? "Yes" : "No",
-    trades_to_target: result.tradesToTarget ?? "",
-    weeks_to_target: result.reached ? result.tradesToTarget / values.tradesPerWeek : "",
-    years_to_target: result.reached ? result.tradesToTarget / values.tradesPerWeek / 52.143 : "",
+    trades_to_target_or_end: result.trades,
+    estimated_weeks: result.trades / values.tradesPerWeek,
     ending_capital: result.endingEquity,
     max_drawdown_pct: result.maxDrawdown * 100,
     touched_50pct_drawdown: result.touchedHalfDrawdown ? "Yes" : "No"
   }));
   $("downloadCsv").disabled = false;
 
-  const chartMaxTrades = medianTrades === null
-    ? horizon.maxTrades
-    : Math.min(horizon.maxTrades, Math.max(100, Math.ceil(percentile(successfulTrades, 0.9) * 1.15)));
-  const highlightIndex = findRepresentativePathIndex(samplePaths, medianTrades, percentile(results.map((result) => result.endingEquity).sort((a, b) => a - b), 0.5));
-  latestChartState = {
-    paths: samplePaths,
+  const highlightedIndex = findMedianSampleIndex(samplePaths, medianSuccessfulTrades);
+  if (highlightedIndex > 0) {
+    const [highlighted] = samplePaths.splice(highlightedIndex, 1);
+    samplePaths.unshift(highlighted);
+  }
+
+  lastChartData = {
+    paths: samplePaths.map((sample) => sample.points),
     start: values.start,
     target: values.target,
-    chartMaxTrades,
-    tradesPerWeek: values.tradesPerWeek,
-    highlightIndex
+    maxTrades: horizon.maxTrades,
+    tradesPerWeek: values.tradesPerWeek
   };
-  drawPathChart(latestChartState);
+  drawPathChart(lastChartData);
   updateHeroFromSimulator();
   saveInputs();
 }
 
-function findRepresentativePathIndex(paths, medianTrades, medianEndingEquity) {
-  if (!paths.length) return -1;
+function findMedianSampleIndex(samples, medianTrades) {
+  if (!samples.length || !Number.isFinite(medianTrades)) return 0;
   let bestIndex = 0;
-  let bestDistance = Number.POSITIVE_INFINITY;
-  paths.forEach((path, index) => {
-    const distance = medianTrades !== null && path.reached
-      ? Math.abs(path.tradesToTarget - medianTrades)
-      : Math.abs(Math.log(Math.max(path.endingEquity, 1)) - Math.log(Math.max(medianEndingEquity, 1)));
+  let bestDistance = Infinity;
+  samples.forEach((sample, index) => {
+    if (!sample.reached) return;
+    const distance = Math.abs(sample.trades - medianTrades);
     if (distance < bestDistance) {
       bestDistance = distance;
       bestIndex = index;
@@ -482,7 +491,7 @@ function clearSimulationResults() {
   $("reachProbabilityNote").textContent = "within the automatic horizon";
   $("simulationSummary").textContent = "Enter your assumptions and run the simulator to estimate the time needed to reach your goal.";
   latestSimulationRows = [];
-  latestChartState = null;
+  lastChartData = null;
   $("downloadCsv").disabled = true;
   drawEmptyChart();
 }
@@ -493,157 +502,145 @@ function getCssVariable(name) {
 
 function drawEmptyChart() {
   const canvas = $("pathChart");
-  const context = canvas.getContext("2d");
-  context.clearRect(0, 0, canvas.width, canvas.height);
-  context.fillStyle = getCssVariable("--bg-secondary");
-  context.fillRect(0, 0, canvas.width, canvas.height);
-  context.fillStyle = getCssVariable("--muted");
-  context.font = "16px Inter, sans-serif";
-  context.textAlign = "center";
-  context.fillText("Run the simulator to draw sample account paths.", canvas.width / 2, canvas.height / 2);
+  const ctx = canvas.getContext("2d");
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  ctx.fillStyle = getCssVariable("--bg-secondary");
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  ctx.fillStyle = getCssVariable("--muted");
+  ctx.font = "16px Inter, sans-serif";
+  ctx.textAlign = "center";
+  ctx.fillText("Run a simulation to draw sample account paths.", canvas.width / 2, canvas.height / 2);
 }
 
-function drawPathChart(state) {
-  const { paths, start, target, chartMaxTrades, tradesPerWeek, highlightIndex } = state;
+function drawPathChart({ paths, start, target, maxTrades, tradesPerWeek }) {
   const canvas = $("pathChart");
-  const context = canvas.getContext("2d");
+  const ctx = canvas.getContext("2d");
   const width = canvas.width;
   const height = canvas.height;
   const padding = { left: 78, right: 24, top: 24, bottom: 50 };
   const chartWidth = width - padding.left - padding.right;
   const chartHeight = height - padding.top - padding.bottom;
 
-  context.clearRect(0, 0, width, height);
-  context.fillStyle = getCssVariable("--bg-secondary");
-  context.fillRect(0, 0, width, height);
+  ctx.clearRect(0, 0, width, height);
+  ctx.fillStyle = getCssVariable("--bg-secondary");
+  ctx.fillRect(0, 0, width, height);
 
-  const visiblePoints = paths.flatMap((path) => path.points.filter((point) => point.trade <= chartMaxTrades));
-  const allEquities = visiblePoints.map((point) => point.equity).filter((value) => value > 0 && Number.isFinite(value));
-  const minEquity = Math.max(1, Math.min(start * 0.35, ...allEquities));
-  const maxEquity = Math.max(target * 1.15, ...allEquities);
+  const allEquities = paths.flatMap((path) => path.map((point) => point.equity)).filter((value) => value > 0 && Number.isFinite(value));
+  const minEquity = Math.max(1, Math.min(start * 0.25, ...allEquities));
+  const maxEquity = Math.max(target * 1.2, ...allEquities);
   const minLog = Math.log10(minEquity);
   const maxLog = Math.log10(maxEquity);
-  const toX = (trade) => padding.left + (Math.min(trade, chartMaxTrades) / chartMaxTrades) * chartWidth;
+  const toX = (trade) => padding.left + (trade / maxTrades) * chartWidth;
   const toY = (equity) => padding.top + (1 - (Math.log10(Math.max(equity, minEquity)) - minLog) / (maxLog - minLog || 1)) * chartHeight;
 
-  context.strokeStyle = getCssVariable("--line");
-  context.lineWidth = 1;
-  context.fillStyle = getCssVariable("--muted");
-  context.font = "12px Inter, sans-serif";
-  context.textAlign = "right";
+  ctx.strokeStyle = getCssVariable("--line");
+  ctx.lineWidth = 1;
+  ctx.fillStyle = getCssVariable("--muted");
+  ctx.font = "12px Inter, sans-serif";
+  ctx.textAlign = "right";
 
-  for (let index = 0; index <= 4; index += 1) {
-    const ratio = index / 4;
-    const value = 10 ** (minLog + (maxLog - minLog) * ratio);
+  for (let i = 0; i <= 4; i += 1) {
+    const ratio = i / 4;
+    const logValue = minLog + (maxLog - minLog) * ratio;
+    const value = 10 ** logValue;
     const y = padding.top + chartHeight - ratio * chartHeight;
-    context.beginPath();
-    context.moveTo(padding.left, y);
-    context.lineTo(width - padding.right, y);
-    context.stroke();
-    context.fillText(money0.format(value), padding.left - 10, y + 4);
+    ctx.beginPath();
+    ctx.moveTo(padding.left, y);
+    ctx.lineTo(width - padding.right, y);
+    ctx.stroke();
+    ctx.fillText(money0.format(value), padding.left - 10, y + 4);
   }
 
-  context.textAlign = "center";
-  for (let index = 0; index <= 4; index += 1) {
-    const trade = chartMaxTrades * index / 4;
+  ctx.textAlign = "center";
+  for (let i = 0; i <= 4; i += 1) {
+    const trade = Math.round((maxTrades * i) / 4);
     const x = toX(trade);
-    context.fillText(formatCompactDurationFromTrades(trade, tradesPerWeek), x, height - 18);
+    ctx.fillText(formatAxisDuration(trade, tradesPerWeek), x, height - 18);
   }
 
-  context.strokeStyle = getCssVariable("--warning");
-  context.lineWidth = 2;
-  context.setLineDash([7, 6]);
-  context.beginPath();
-  context.moveTo(padding.left, toY(target));
-  context.lineTo(width - padding.right, toY(target));
-  context.stroke();
-  context.setLineDash([]);
+  ctx.strokeStyle = getCssVariable("--warning");
+  ctx.lineWidth = 2;
+  ctx.setLineDash([7, 6]);
+  ctx.beginPath();
+  ctx.moveTo(padding.left, toY(target));
+  ctx.lineTo(width - padding.right, toY(target));
+  ctx.stroke();
+  ctx.setLineDash([]);
 
-  paths.forEach((path, pathIndex) => {
-    const points = path.points.filter((point) => point.trade <= chartMaxTrades);
-    if (points.length < 2) return;
-    context.beginPath();
-    points.forEach((point, pointIndex) => {
+  const pathColor = getCssVariable("--muted");
+  paths.forEach((path, index) => {
+    ctx.beginPath();
+    path.forEach((point, pointIndex) => {
       const x = toX(point.trade);
       const y = toY(point.equity);
-      if (pointIndex === 0) context.moveTo(x, y);
-      else context.lineTo(x, y);
+      if (pointIndex === 0) ctx.moveTo(x, y);
+      else ctx.lineTo(x, y);
     });
-    const highlighted = pathIndex === highlightIndex;
-    context.strokeStyle = highlighted ? getCssVariable("--accent") : getCssVariable("--muted");
-    context.globalAlpha = highlighted ? 1 : 0.23;
-    context.lineWidth = highlighted ? 3 : 1.2;
-    context.stroke();
+    ctx.strokeStyle = index === 0 ? getCssVariable("--accent") : pathColor;
+    ctx.globalAlpha = index === 0 ? 1 : 0.22;
+    ctx.lineWidth = index === 0 ? 3 : 1.2;
+    ctx.stroke();
   });
-  context.globalAlpha = 1;
+  ctx.globalAlpha = 1;
 }
 
 function validateSizerInputs(values) {
-  if (!Number.isFinite(values.equity) || values.equity <= 0) return "Enter valid account equity greater than $0.";
-  if (!Number.isFinite(values.winRate) || values.winRate <= 0 || values.winRate >= 100) return "Win rate must be greater than 0% and below 100%.";
-  if (!Number.isFinite(values.avgWin) || values.avgWin <= 0) return "Average winner must be greater than 0.";
-  if (!Number.isFinite(values.avgLoss) || values.avgLoss <= 0) return "Average loser must be greater than 0.";
-  if (!Number.isFinite(values.entry) || values.entry <= 0) return "Entry price must be greater than $0.";
-  if (!Number.isFinite(values.stop) || values.stop < 0 || values.entry === values.stop) return "Entry and stop prices must be different, and stop price cannot be negative.";
-  if (!Number.isFinite(values.multiplier) || values.multiplier <= 0) return "Contract or share multiplier must be greater than 0.";
-  if (!Number.isFinite(values.riskCap) || values.riskCap <= 0 || values.riskCap >= 100) return "Maximum account risk must be greater than 0% and below 100%.";
+  if (!Number.isFinite(values.equity) || values.equity <= 0) return "Account equity must be a positive dollar amount.";
+  if (values.winRate <= 0 || values.winRate >= 100) return "Win rate must be between 0% and 100%.";
+  if (values.avgWin <= 0 || values.avgLoss <= 0) return "Average winner and loser must be positive.";
+  if (!Number.isFinite(values.entry) || !Number.isFinite(values.stop) || values.entry <= 0 || values.stop < 0 || values.entry === values.stop) {
+    return "Entry and stop prices must be valid, different dollar amounts.";
+  }
+  if (values.multiplier <= 0) return "The unit multiplier must be positive.";
+  if (values.rounding <= 0) return "The rounding increment must be positive.";
   return null;
 }
 
-function clearSizerResults() {
-  [
-    "positionUnits", "sizePayoffRatio", "sizeFullKelly", "sizeAppliedRisk", "sizeDollarRisk",
-    "riskPerUnit", "positionNotional", "positionLeverage", "expectedValueTrade", "averageWinDollars"
-  ].forEach((id) => {
-    $(id).textContent = "—";
-  });
-  $("edgeBadge").className = "pill neutral";
-  $("edgeBadge").textContent = "Waiting for valid inputs";
+function readSizerValues() {
+  return {
+    equity: parseMoney($("accountEquity").value),
+    winRate: Number($("sizeWinRate").value),
+    avgWin: Number($("sizeAvgWin").value),
+    avgLoss: Number($("sizeAvgLoss").value),
+    kellyScale: Number($("sizeKellyScale").value),
+    entry: parseMoney($("entryPrice").value),
+    stop: parseMoney($("stopPrice").value),
+    multiplier: Number($("unitMultiplier").value),
+    rounding: Number($("roundingIncrement").value)
+  };
 }
 
 function calculatePositionSize(event) {
   if (event) event.preventDefault();
   hideMessage($("sizerMessage"));
 
-  const values = {
-    equity: valueOf("accountEquity"),
-    winRate: valueOf("sizeWinRate"),
-    avgWin: valueOf("sizeAvgWin"),
-    avgLoss: valueOf("sizeAvgLoss"),
-    kellyScale: valueOf("sizeKellyScale"),
-    riskCap: valueOf("sizeRiskCap"),
-    entry: valueOf("entryPrice"),
-    stop: valueOf("stopPrice"),
-    multiplier: valueOf("unitMultiplier"),
-    rounding: valueOf("roundingIncrement")
-  };
-
+  const values = readSizerValues();
   const validationError = validateSizerInputs(values);
   if (validationError) {
     showMessage($("sizerMessage"), validationError);
-    clearSizerResults();
     return;
   }
 
   const kelly = calculateKelly(values.winRate, values.avgWin, values.avgLoss);
-  const appliedRisk = Math.min(kelly.fullKelly * values.kellyScale, values.riskCap / 100);
-  const dollarRiskBudget = values.equity * appliedRisk;
+  const plannedRiskFraction = kelly.fullKelly * values.kellyScale;
+  const dollarRiskBudget = values.equity * plannedRiskFraction;
   const perUnitRisk = Math.abs(values.entry - values.stop) * values.multiplier;
   const rawUnits = perUnitRisk > 0 ? dollarRiskBudget / perUnitRisk : 0;
   const units = Math.max(0, Math.floor(rawUnits / values.rounding) * values.rounding);
   const actualDollarRisk = units * perUnitRisk;
-  const notional = units * values.entry * values.multiplier;
-  const leverage = values.equity > 0 ? notional / values.equity : 0;
+  const actualRiskFraction = values.equity > 0 ? actualDollarRisk / values.equity : 0;
+  const positionValue = units * values.entry * values.multiplier;
+  const leverage = values.equity > 0 ? positionValue / values.equity : 0;
   const expectancyDollars = actualDollarRisk * kelly.expectancy;
   const averageWinDollars = actualDollarRisk * kelly.payoffRatio;
 
   $("positionUnits").textContent = number0.format(units);
   $("sizePayoffRatio").textContent = `${kelly.payoffRatio.toFixed(2)} : 1`;
   $("sizeFullKelly").textContent = `${(kelly.fullKelly * 100).toFixed(2)}%`;
-  $("sizeAppliedRisk").textContent = `${(appliedRisk * 100).toFixed(2)}%`;
+  $("sizeAppliedRisk").textContent = `${(actualRiskFraction * 100).toFixed(2)}%`;
   $("sizeDollarRisk").textContent = money2.format(actualDollarRisk);
   $("riskPerUnit").textContent = money2.format(perUnitRisk);
-  $("positionNotional").textContent = money0.format(notional);
+  $("positionNotional").textContent = money0.format(positionValue);
   $("positionLeverage").textContent = `${leverage.toFixed(2)}×`;
   $("expectedValueTrade").textContent = money2.format(expectancyDollars);
   $("averageWinDollars").textContent = money2.format(averageWinDollars);
@@ -654,12 +651,14 @@ function calculatePositionSize(event) {
     badge.textContent = `Positive edge: ${kelly.expectancy.toFixed(2)}R`;
   } else {
     badge.className = "pill negative";
-    badge.textContent = `No Kelly bet: ${kelly.expectancy.toFixed(2)}R`;
-    showMessage($("sizerMessage"), "These assumptions do not produce a positive Kelly edge, so the suggested risk is 0%.", "warning");
+    badge.textContent = `No Kelly position: ${kelly.expectancy.toFixed(2)}R`;
+    showMessage($("sizerMessage"), "These assumptions do not produce a positive Kelly edge. The suggested Kelly risk is 0%.", "warning");
   }
 
-  if (units === 0 && appliedRisk > 0) {
-    showMessage($("sizerMessage"), "The risk budget is smaller than the loss on one unit at the chosen stop. Use a tighter stop, smaller multiplier, or higher permitted risk.", "warning");
+  if (units === 0 && plannedRiskFraction > 0) {
+    showMessage($("sizerMessage"), "The Kelly risk budget is smaller than the loss on one unit at your selected stop. Use a tighter stop, smaller multiplier, or more account equity.", "warning");
+  } else if (plannedRiskFraction >= 0.1) {
+    showMessage($("sizerMessage"), `The selected Kelly fraction targets ${(plannedRiskFraction * 100).toFixed(2)}% account risk before unit rounding. This is highly aggressive.`, "warning");
   }
 
   saveInputs();
@@ -678,7 +677,7 @@ function downloadSimulationCsv() {
   const url = URL.createObjectURL(blob);
   const link = document.createElement("a");
   link.href = url;
-  link.download = "kelly-goal-simulation.csv";
+  link.download = "kelly-simulation-results.csv";
   document.body.appendChild(link);
   link.click();
   link.remove();
@@ -687,8 +686,8 @@ function downloadSimulationCsv() {
 
 function setTheme(theme) {
   document.documentElement.dataset.theme = theme;
-  localStorage.setItem("kellyLabTheme", theme);
-  if (latestChartState) drawPathChart(latestChartState);
+  safeStorageSet("kellyLabTheme", theme);
+  if (lastChartData) drawPathChart(lastChartData);
   else drawEmptyChart();
 }
 
@@ -703,23 +702,13 @@ function initializeTabs() {
   });
 }
 
-function initializeMoneyInputs() {
-  document.querySelectorAll(".money-input").forEach((input) => {
-    input.addEventListener("input", () => formatMoneyWhileTyping(input));
-    input.addEventListener("blur", () => {
-      finalizeMoneyInput(input);
-      saveInputs();
-    });
-    finalizeMoneyInput(input);
-  });
-}
-
 function initialize() {
   loadInputs();
-  initializeTabs();
   initializeMoneyInputs();
+  initializeTabs();
 
-  document.documentElement.dataset.theme = localStorage.getItem("kellyLabTheme") || "dark";
+  const savedTheme = safeStorageGet("kellyLabTheme", "dark") || "dark";
+  document.documentElement.dataset.theme = savedTheme;
 
   $("simulatorForm").addEventListener("submit", runSimulation);
   $("sizerForm").addEventListener("submit", calculatePositionSize);
@@ -744,7 +733,7 @@ function initialize() {
     setTheme(current === "dark" ? "light" : "dark");
   });
 
-  ["simWinRate", "simAvgWin", "simAvgLoss", "simKellyScale", "simRiskCap"].forEach((id) => {
+  ["simWinRate", "simAvgWin", "simAvgLoss", "simKellyScale"].forEach((id) => {
     $(id).addEventListener("input", updateHeroFromSimulator);
   });
 
@@ -755,7 +744,10 @@ function initialize() {
   updateHeroFromSimulator();
   drawEmptyChart();
   calculatePositionSize();
-  runSimulation();
 }
 
-window.addEventListener("DOMContentLoaded", initialize);
+if (document.readyState === "loading") {
+  window.addEventListener("DOMContentLoaded", initialize, { once: true });
+} else {
+  initialize();
+}

@@ -3,22 +3,22 @@
 KellyLab is a static GitHub Pages app with two trading tools:
 
 1. **Goal Simulator** — uses Monte Carlo simulation to estimate the median, faster, and slower time needed to grow from a starting account value to a target value.
-2. **Kelly Size Calculator** — converts win rate, payoff ratio, account equity, entry price, and stop price into a fractional-Kelly risk budget and position size.
+2. **Kelly Size Calculator** — converts win rate, payoff ratio, account equity, entry price, and stop price into a fractional-Kelly position size.
 
 The app uses only HTML, CSS, and JavaScript. There is no server, database, build process, API key, or external dependency.
 
-## Version 1.1 fixes
+## Current version fixes
 
-- Currency inputs now display commas while typing.
-- Removed the browser `step` mismatch that produced messages such as “nearest valid values are 99,901 and 100,001.”
-- Removed the user-facing random seed.
-- Removed the manual maximum-trades-per-path input.
-- The simulation horizon is now selected automatically from the target, edge, risk level, trading frequency, and browser performance limit.
-- The main output now emphasizes calendar time to target.
-- Added 25th-percentile, median, and 75th-percentile time estimates.
-- Added probabilities of reaching the target within one, three, and five years.
-- Added a plain-English result summary and the actual account gain/loss assumed per trade.
-- Corrected the sample-path legend so the highlighted path is actually close to the median result.
+- All dollar inputs display comma separators, including starting capital, target capital, account equity, entry price, and stop price.
+- Currency values with commas are parsed correctly by both calculators.
+- Removed the browser step mismatch that produced “nearest valid values” errors.
+- Removed the risk-cap option and all risk-cap logic from both calculators.
+- Fractional Kelly is now the only risk adjustment: full, half, quarter, or one-tenth Kelly.
+- Removed the user-facing random seed and manual maximum-trades input.
+- The simulator creates a repeatable internal seed and automatic safety horizon.
+- Fixed the Estimate Time to Goal button so it no longer references removed form fields.
+- The goal results emphasize median time, faster/slower ranges, one/three/five-year probabilities, and drawdown risk.
+- The sizing calculator reports actual risk after unit rounding rather than overstating the planned risk.
 
 ## Launch locally
 
@@ -45,23 +45,8 @@ Using Git:
 
 ```bash
 git add index.html styles.css app.js README.md
-git commit -m "Fix Kelly simulator inputs and goal timeline"
+git commit -m "Remove risk cap and fix Kelly calculators"
 git push origin main
-```
-
-## Publish a new GitHub Pages site
-
-1. Create a GitHub repository.
-2. Upload the four files above to the repository root.
-3. Open **Settings → Pages**.
-4. Under **Build and deployment**, choose **Deploy from a branch**.
-5. Select `main` and `/ (root)`.
-6. Save.
-
-The normal URL format is:
-
-```text
-https://YOUR-USERNAME.github.io/YOUR-REPOSITORY-NAME/
 ```
 
 ## Kelly formula
@@ -69,17 +54,18 @@ https://YOUR-USERNAME.github.io/YOUR-REPOSITORY-NAME/
 ```text
 Payoff ratio b = average winner / average loser
 Full Kelly f* = (b × p − q) / b
+Applied Kelly risk = Full Kelly × selected Kelly fraction
 ```
 
-The simulator uses the smaller of fractional Kelly or the maximum account-risk input.
-
-For example, with a 1.5-to-1 payoff ratio and 2% account risk:
+There is no risk cap in this version. For example, if Full Kelly is 25%:
 
 ```text
-Average win impact  = +3.0% of account equity
-Average loss impact = -2.0% of account equity
+Full Kelly       = 25.00% account risk
+Half Kelly       = 12.50% account risk
+Quarter Kelly    = 6.25% account risk
+One-tenth Kelly  = 2.50% account risk
 ```
 
 ## Important limitation
 
-The model assumes a stable win rate and payoff ratio, independent trades, immediate stop execution, and no fees, taxes, gaps, slippage, correlation, or strategy decay. The output is a hypothetical range, not a forecast or guarantee.
+The model assumes a stable win rate and payoff ratio, independent trades, immediate stop execution, and no fees, taxes, gaps, slippage, correlation, or strategy decay. Kelly can recommend extremely aggressive sizing when the estimated edge is high. The output is hypothetical, not financial advice or a guarantee.
