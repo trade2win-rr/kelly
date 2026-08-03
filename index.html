@@ -1,0 +1,337 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="description" content="A Kelly Criterion simulator and position-sizing calculator for traders." />
+  <title>KellyLab — Trading Kelly Simulator</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <div class="app-shell">
+    <header class="topbar">
+      <div>
+        <p class="eyebrow">TRADING RISK TOOLKIT</p>
+        <h1>Kelly<span>Lab</span></h1>
+      </div>
+      <button id="themeToggle" class="icon-button" type="button" aria-label="Toggle theme">◐</button>
+    </header>
+
+    <section class="hero card">
+      <div>
+        <p class="eyebrow">MODEL THE EDGE. CONTROL THE RISK.</p>
+        <h2>Turn your win rate and payoff ratio into a repeatable sizing process.</h2>
+        <p class="hero-copy">
+          Run thousands of simulated trading paths to estimate how many trades it may take to reach a goal, then translate the same assumptions into a practical position size.
+        </p>
+      </div>
+      <div class="hero-stat-grid">
+        <div>
+          <span id="heroKelly">—</span>
+          <small>Full Kelly</small>
+        </div>
+        <div>
+          <span id="heroRisk">—</span>
+          <small>Applied risk</small>
+        </div>
+        <div>
+          <span id="heroExpectancy">—</span>
+          <small>Expectancy</small>
+        </div>
+      </div>
+    </section>
+
+    <nav class="tab-list" aria-label="Calculator sections">
+      <button class="tab-button active" data-tab="simulator" type="button">Goal Simulator</button>
+      <button class="tab-button" data-tab="sizer" type="button">Kelly Size Calculator</button>
+      <button class="tab-button" data-tab="method" type="button">How It Works</button>
+    </nav>
+
+    <main>
+      <section id="simulator" class="tab-panel active">
+        <div class="two-column">
+          <form id="simulatorForm" class="card form-card">
+            <div class="section-heading">
+              <div>
+                <p class="eyebrow">MONTE CARLO</p>
+                <h3>Goal simulator inputs</h3>
+              </div>
+              <button class="text-button" id="resetSimulator" type="button">Reset</button>
+            </div>
+
+            <div class="field-grid">
+              <label>
+                Starting capital
+                <div class="input-prefix"><span>$</span><input id="startCapital" type="number" min="1" step="100" value="100000" required /></div>
+              </label>
+              <label>
+                Target capital
+                <div class="input-prefix"><span>$</span><input id="targetCapital" type="number" min="1" step="100" value="1000000" required /></div>
+              </label>
+              <label>
+                Win rate
+                <div class="input-suffix"><input id="simWinRate" type="number" min="0.1" max="99.9" step="0.1" value="55" required /><span>%</span></div>
+              </label>
+              <label>
+                Average winner
+                <div class="input-suffix"><input id="simAvgWin" type="number" min="0.01" step="0.01" value="1.5" required /><span>units</span></div>
+              </label>
+              <label>
+                Average loser
+                <div class="input-suffix"><input id="simAvgLoss" type="number" min="0.01" step="0.01" value="1" required /><span>units</span></div>
+              </label>
+              <label>
+                Kelly fraction used
+                <select id="simKellyScale">
+                  <option value="1">Full Kelly</option>
+                  <option value="0.5">Half Kelly</option>
+                  <option value="0.25" selected>Quarter Kelly</option>
+                  <option value="0.1">One-tenth Kelly</option>
+                </select>
+              </label>
+              <label>
+                Hard risk cap per trade
+                <div class="input-suffix"><input id="simRiskCap" type="number" min="0" max="100" step="0.1" value="2" required /><span>%</span></div>
+              </label>
+              <label>
+                Number of simulations
+                <select id="simulationCount">
+                  <option value="1000">1,000</option>
+                  <option value="5000" selected>5,000</option>
+                  <option value="10000">10,000</option>
+                  <option value="25000">25,000</option>
+                </select>
+              </label>
+              <label>
+                Maximum trades per path
+                <input id="maxTrades" type="number" min="10" max="50000" step="100" value="5000" required />
+              </label>
+              <label>
+                Average trades per week
+                <input id="tradesPerWeek" type="number" min="0.1" max="1000" step="0.1" value="10" required />
+              </label>
+              <label>
+                Random seed
+                <input id="randomSeed" type="number" step="1" value="42" required />
+              </label>
+            </div>
+
+            <div id="simulatorMessage" class="message hidden" role="status"></div>
+            <button class="primary-button" type="submit">Run simulation</button>
+            <p class="microcopy">Average winner and loser may be entered in dollars, percentages, or R-multiples. Only their ratio is used. Example: a typical +15% winner and −10% loser can be entered as 15 and 10.</p>
+          </form>
+
+          <div class="results-stack">
+            <section class="card">
+              <div class="section-heading">
+                <div>
+                  <p class="eyebrow">RESULTS</p>
+                  <h3>Estimated path to target</h3>
+                </div>
+                <button id="downloadCsv" class="text-button" type="button" disabled>Download CSV</button>
+              </div>
+
+              <div class="metric-grid">
+                <article class="metric primary-metric">
+                  <span>Target reached</span>
+                  <strong id="reachProbability">—</strong>
+                  <small>of simulated paths</small>
+                </article>
+                <article class="metric">
+                  <span>Median trades</span>
+                  <strong id="medianTrades">—</strong>
+                  <small>among successful paths</small>
+                </article>
+                <article class="metric">
+                  <span>Estimated median time</span>
+                  <strong id="medianTime">—</strong>
+                  <small>using trades per week</small>
+                </article>
+                <article class="metric">
+                  <span>Middle 50%</span>
+                  <strong id="tradeRange">—</strong>
+                  <small>25th–75th percentile</small>
+                </article>
+                <article class="metric">
+                  <span>Median max drawdown</span>
+                  <strong id="medianDrawdown">—</strong>
+                  <small>all simulated paths</small>
+                </article>
+                <article class="metric">
+                  <span>50% drawdown risk</span>
+                  <strong id="deepDrawdownRisk">—</strong>
+                  <small>paths touching −50%</small>
+                </article>
+                <article class="metric">
+                  <span>Median ending capital</span>
+                  <strong id="medianEndingCapital">—</strong>
+                  <small>at target or max trades</small>
+                </article>
+              </div>
+            </section>
+
+            <section class="card chart-card">
+              <div class="section-heading">
+                <div>
+                  <p class="eyebrow">SAMPLE PATHS</p>
+                  <h3>Account growth trajectories</h3>
+                </div>
+                <span class="pill">Log scale</span>
+              </div>
+              <canvas id="pathChart" width="900" height="440" aria-label="Simulated account paths"></canvas>
+              <div class="chart-legend">
+                <span><i class="legend-line target-line"></i>Target</span>
+                <span><i class="legend-line median-line"></i>Median sample path</span>
+                <span><i class="legend-line path-line"></i>Other sample paths</span>
+              </div>
+            </section>
+          </div>
+        </div>
+      </section>
+
+      <section id="sizer" class="tab-panel">
+        <div class="two-column">
+          <form id="sizerForm" class="card form-card">
+            <div class="section-heading">
+              <div>
+                <p class="eyebrow">POSITION SIZING</p>
+                <h3>Kelly size calculator</h3>
+              </div>
+              <button class="text-button" id="resetSizer" type="button">Reset</button>
+            </div>
+
+            <div class="field-grid">
+              <label>
+                Account equity
+                <div class="input-prefix"><span>$</span><input id="accountEquity" type="number" min="1" step="100" value="100000" required /></div>
+              </label>
+              <label>
+                Win rate
+                <div class="input-suffix"><input id="sizeWinRate" type="number" min="0.1" max="99.9" step="0.1" value="55" required /><span>%</span></div>
+              </label>
+              <label>
+                Average winner
+                <input id="sizeAvgWin" type="number" min="0.01" step="0.01" value="1.5" required />
+              </label>
+              <label>
+                Average loser
+                <input id="sizeAvgLoss" type="number" min="0.01" step="0.01" value="1" required />
+              </label>
+              <label>
+                Kelly fraction used
+                <select id="sizeKellyScale">
+                  <option value="1">Full Kelly</option>
+                  <option value="0.5">Half Kelly</option>
+                  <option value="0.25" selected>Quarter Kelly</option>
+                  <option value="0.1">One-tenth Kelly</option>
+                </select>
+              </label>
+              <label>
+                Hard risk cap
+                <div class="input-suffix"><input id="sizeRiskCap" type="number" min="0" max="100" step="0.1" value="1" required /><span>%</span></div>
+              </label>
+              <label>
+                Entry price
+                <div class="input-prefix"><span>$</span><input id="entryPrice" type="number" min="0.0001" step="0.01" value="100" required /></div>
+              </label>
+              <label>
+                Stop price
+                <div class="input-prefix"><span>$</span><input id="stopPrice" type="number" min="0" step="0.01" value="95" required /></div>
+              </label>
+              <label>
+                Contract / share multiplier
+                <input id="unitMultiplier" type="number" min="0.0001" step="1" value="1" required />
+                <span class="field-help">Use 1 for shares, 100 for standard equity options.</span>
+              </label>
+              <label>
+                Round units to
+                <select id="roundingIncrement">
+                  <option value="1" selected>1 unit</option>
+                  <option value="5">5 units</option>
+                  <option value="10">10 units</option>
+                  <option value="100">100 units</option>
+                </select>
+              </label>
+            </div>
+
+            <div id="sizerMessage" class="message hidden" role="status"></div>
+            <button class="primary-button" type="submit">Calculate position size</button>
+          </form>
+
+          <section class="card size-results-card">
+            <div class="section-heading">
+              <div>
+                <p class="eyebrow">SIZING OUTPUT</p>
+                <h3>Suggested risk and position</h3>
+              </div>
+              <span id="edgeBadge" class="pill neutral">Waiting for inputs</span>
+            </div>
+
+            <div class="size-hero">
+              <span>Suggested position</span>
+              <strong id="positionUnits">—</strong>
+              <small id="positionUnitsLabel">shares / contracts / units</small>
+            </div>
+
+            <div class="result-list">
+              <div><span>Payoff ratio</span><strong id="sizePayoffRatio">—</strong></div>
+              <div><span>Full Kelly</span><strong id="sizeFullKelly">—</strong></div>
+              <div><span>Applied risk</span><strong id="sizeAppliedRisk">—</strong></div>
+              <div><span>Dollar risk</span><strong id="sizeDollarRisk">—</strong></div>
+              <div><span>Risk per unit</span><strong id="riskPerUnit">—</strong></div>
+              <div><span>Position notional</span><strong id="positionNotional">—</strong></div>
+              <div><span>Notional / equity</span><strong id="positionLeverage">—</strong></div>
+              <div><span>Expected value per trade</span><strong id="expectedValueTrade">—</strong></div>
+              <div><span>Average winning trade</span><strong id="averageWinDollars">—</strong></div>
+            </div>
+
+            <div class="risk-callout">
+              <strong>Practical rule</strong>
+              <p>Kelly is an upper-bound growth model. Your hard risk cap should usually control the final number, especially when estimates are based on a small sample or market conditions are changing.</p>
+            </div>
+          </section>
+        </div>
+      </section>
+
+      <section id="method" class="tab-panel">
+        <div class="method-grid">
+          <article class="card prose-card">
+            <p class="eyebrow">FORMULA</p>
+            <h3>What the calculator is doing</h3>
+            <p>For a strategy with win probability <em>p</em>, loss probability <em>q = 1 − p</em>, and payoff ratio <em>b = average win ÷ average loss</em>:</p>
+            <div class="formula">Full Kelly = (b × p − q) ÷ b</div>
+            <p>The result is the theoretical fraction of account equity to risk on each independent trade when a normal losing trade loses one unit of risk.</p>
+          </article>
+
+          <article class="card prose-card">
+            <p class="eyebrow">INTERPRETATION</p>
+            <h3>Win rate is not your edge</h3>
+            <p>A 60% win rate does not automatically mean a 60% edge. A strategy can win often and still lose money if its losers are much larger than its winners. The simulator combines both win probability and payoff ratio.</p>
+            <div class="formula">Expectancy = p × b − q</div>
+          </article>
+
+          <article class="card prose-card">
+            <p class="eyebrow">SIMULATION</p>
+            <h3>How account paths are generated</h3>
+            <p>Each path repeatedly draws a win or loss using your entered win rate. A win increases equity by the applied risk fraction multiplied by the payoff ratio. A loss reduces equity by the applied risk fraction.</p>
+            <p>The process stops when the path reaches the target or hits the maximum number of trades.</p>
+          </article>
+
+          <article class="card prose-card warning-card">
+            <p class="eyebrow">LIMITATIONS</p>
+            <h3>What Kelly does not know</h3>
+            <p>Real trades are not perfectly independent. Slippage, gaps, changing volatility, strategy decay, correlated positions, taxes, fees, and estimation error can all make realized results worse than the model.</p>
+            <p>Use historical data across enough trades, test different regimes, and favor fractional Kelly plus a conservative hard cap.</p>
+          </article>
+        </div>
+      </section>
+    </main>
+
+    <footer>
+      <p>KellyLab is an educational modeling tool, not financial advice. Estimates are hypothetical and depend entirely on the assumptions entered.</p>
+    </footer>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>
