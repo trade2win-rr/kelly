@@ -1,15 +1,28 @@
 # KellyLab
 
-KellyLab is a static web app for traders with two tools:
+KellyLab is a static GitHub Pages app with two trading tools:
 
-1. **Kelly Goal Simulator** — runs Monte Carlo simulations to estimate the probability, number of trades, and approximate calendar time needed to grow from a starting balance to a target balance.
-2. **Kelly Size Calculator** — converts win rate, average win/loss, account size, entry, and stop into a fractional-Kelly risk budget and position size.
+1. **Goal Simulator** — uses Monte Carlo simulation to estimate the median, faster, and slower time needed to grow from a starting account value to a target value.
+2. **Kelly Size Calculator** — converts win rate, payoff ratio, account equity, entry price, and stop price into a fractional-Kelly risk budget and position size.
 
-The app uses only HTML, CSS, and JavaScript. It has no server, database, build step, or external dependency, so it can be hosted free with GitHub Pages.
+The app uses only HTML, CSS, and JavaScript. There is no server, database, build process, API key, or external dependency.
+
+## Version 1.1 fixes
+
+- Currency inputs now display commas while typing.
+- Removed the browser `step` mismatch that produced messages such as “nearest valid values are 99,901 and 100,001.”
+- Removed the user-facing random seed.
+- Removed the manual maximum-trades-per-path input.
+- The simulation horizon is now selected automatically from the target, edge, risk level, trading frequency, and browser performance limit.
+- The main output now emphasizes calendar time to target.
+- Added 25th-percentile, median, and 75th-percentile time estimates.
+- Added probabilities of reaching the target within one, three, and five years.
+- Added a plain-English result summary and the actual account gain/loss assumed per trade.
+- Corrected the sample-path legend so the highlighted path is actually close to the median result.
 
 ## Launch locally
 
-Open `index.html` in a browser, or serve the folder with a basic local server:
+Open `index.html` directly, or run:
 
 ```bash
 python -m http.server 8000
@@ -17,64 +30,56 @@ python -m http.server 8000
 
 Then open `http://localhost:8000`.
 
-## Publish with GitHub Pages
+## Update an existing GitHub repository
 
-### New repository
+Replace the existing files in the repository root with:
 
-1. Create a new GitHub repository, such as `kelly-simulator`.
-2. Upload `index.html`, `styles.css`, `app.js`, and `README.md` to the repository root.
-3. Open the repository's **Settings**.
-4. Select **Pages** in the left menu.
-5. Under **Build and deployment**, choose **Deploy from a branch**.
-6. Select the `main` branch and `/ (root)` folder, then save.
-7. GitHub will provide the public Pages URL after deployment.
+- `index.html`
+- `styles.css`
+- `app.js`
+- `README.md`
 
-### Existing repository using Git
+Then commit the changes. GitHub Pages should redeploy automatically.
+
+Using Git:
 
 ```bash
-git clone https://github.com/YOUR-USERNAME/YOUR-REPOSITORY.git
-cd YOUR-REPOSITORY
-# Copy the KellyLab files into this folder
-git add .
-git commit -m "Add KellyLab simulator"
+git add index.html styles.css app.js README.md
+git commit -m "Fix Kelly simulator inputs and goal timeline"
 git push origin main
 ```
 
-Then enable GitHub Pages in the repository settings as described above.
+## Publish a new GitHub Pages site
+
+1. Create a GitHub repository.
+2. Upload the four files above to the repository root.
+3. Open **Settings → Pages**.
+4. Under **Build and deployment**, choose **Deploy from a branch**.
+5. Select `main` and `/ (root)`.
+6. Save.
+
+The normal URL format is:
+
+```text
+https://YOUR-USERNAME.github.io/YOUR-REPOSITORY-NAME/
+```
 
 ## Kelly formula
-
-The calculator uses:
 
 ```text
 Payoff ratio b = average winner / average loser
 Full Kelly f* = (b × p − q) / b
 ```
 
-Where:
+The simulator uses the smaller of fractional Kelly or the maximum account-risk input.
 
-- `p` is the probability of a winning trade.
-- `q` is `1 − p`.
-- `b` is the average winner divided by the average loser.
-
-Negative Kelly values are treated as 0%, meaning the assumptions do not describe a positive edge.
-
-## Simulator mechanics
-
-For each simulated trade:
+For example, with a 1.5-to-1 payoff ratio and 2% account risk:
 
 ```text
-Winning trade: equity × (1 + applied risk × payoff ratio)
-Losing trade:  equity × (1 − applied risk)
+Average win impact  = +3.0% of account equity
+Average loss impact = -2.0% of account equity
 ```
-
-Applied risk is the smaller of:
-
-- Full Kelly multiplied by the chosen fraction; or
-- The hard risk cap entered by the user.
-
-The time estimate converts the median successful trade count using the user's entered average trades per week.
 
 ## Important limitation
 
-The model assumes a stable win rate and payoff ratio, independent trades, immediate stop execution, and no fees, taxes, gaps, slippage, correlation, or strategy decay. It is an educational model and not financial advice.
+The model assumes a stable win rate and payoff ratio, independent trades, immediate stop execution, and no fees, taxes, gaps, slippage, correlation, or strategy decay. The output is a hypothetical range, not a forecast or guarantee.

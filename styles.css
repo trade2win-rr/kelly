@@ -259,3 +259,49 @@ footer { padding: 30px 4px 0; color: var(--muted); text-align: center; font-size
   .tab-list { width: 100%; }
   .tab-button { flex: 1 0 auto; }
 }
+
+/* Version 1.1 additions */
+.result-summary-card { padding: 24px; }
+.simulation-summary {
+  margin-bottom: 18px;
+  padding: 18px 20px;
+  border: 1px solid rgba(73, 223, 154, 0.22);
+  border-radius: 16px;
+  background: var(--accent-soft);
+  color: var(--muted);
+  font-size: 0.98rem;
+  line-height: 1.7;
+}
+.simulation-summary strong { color: var(--text); }
+.time-metric-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.large-metric strong { font-size: clamp(1.65rem, 4vw, 2.45rem); }
+.assumption-strip {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+  margin-top: 14px;
+}
+.assumption-strip div {
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: var(--bg-secondary);
+}
+.assumption-strip span,
+.assumption-strip strong { display: block; }
+.assumption-strip span { margin-bottom: 7px; color: var(--muted); font-size: 0.71rem; }
+.assumption-strip strong { font-size: 0.96rem; }
+.money-input { font-variant-numeric: tabular-nums; }
+
+@media (max-width: 920px) {
+  .assumption-strip { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+
+@media (max-width: 720px) {
+  .result-summary-card { padding: 18px; }
+  .time-metric-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+
+@media (max-width: 460px) {
+  .time-metric-grid, .assumption-strip { grid-template-columns: 1fr; }
+}

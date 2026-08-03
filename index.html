@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <meta name="description" content="A Kelly Criterion simulator and position-sizing calculator for traders." />
+  <meta name="description" content="A Kelly Criterion goal simulator and position-sizing calculator for traders." />
   <title>KellyLab — Trading Kelly Simulator</title>
   <link rel="stylesheet" href="styles.css" />
 </head>
@@ -20,9 +20,9 @@
     <section class="hero card">
       <div>
         <p class="eyebrow">MODEL THE EDGE. CONTROL THE RISK.</p>
-        <h2>Turn your win rate and payoff ratio into a repeatable sizing process.</h2>
+        <h2>Estimate how long your trading edge may take to reach a dollar goal.</h2>
         <p class="hero-copy">
-          Run thousands of simulated trading paths to estimate how many trades it may take to reach a goal, then translate the same assumptions into a practical position size.
+          Enter your win rate, average win and loss, risk level, and trading frequency. KellyLab then simulates thousands of possible account paths and converts the result into an estimated calendar timeline.
         </p>
       </div>
       <div class="hero-stat-grid">
@@ -32,7 +32,7 @@
         </div>
         <div>
           <span id="heroRisk">—</span>
-          <small>Applied risk</small>
+          <small>Risk used per trade</small>
         </div>
         <div>
           <span id="heroExpectancy">—</span>
@@ -50,11 +50,11 @@
     <main>
       <section id="simulator" class="tab-panel active">
         <div class="two-column">
-          <form id="simulatorForm" class="card form-card">
+          <form id="simulatorForm" class="card form-card" novalidate>
             <div class="section-heading">
               <div>
-                <p class="eyebrow">MONTE CARLO</p>
-                <h3>Goal simulator inputs</h3>
+                <p class="eyebrow">GOAL MODEL</p>
+                <h3>Your trading assumptions</h3>
               </div>
               <button class="text-button" id="resetSimulator" type="button">Reset</button>
             </div>
@@ -62,23 +62,25 @@
             <div class="field-grid">
               <label>
                 Starting capital
-                <div class="input-prefix"><span>$</span><input id="startCapital" type="number" min="1" step="100" value="100000" required /></div>
+                <div class="input-prefix"><span>$</span><input id="startCapital" class="money-input" type="text" inputmode="numeric" data-max-decimals="0" data-min-decimals="0" value="100,000" autocomplete="off" /></div>
               </label>
               <label>
                 Target capital
-                <div class="input-prefix"><span>$</span><input id="targetCapital" type="number" min="1" step="100" value="1000000" required /></div>
+                <div class="input-prefix"><span>$</span><input id="targetCapital" class="money-input" type="text" inputmode="numeric" data-max-decimals="0" data-min-decimals="0" value="1,000,000" autocomplete="off" /></div>
               </label>
               <label>
                 Win rate
-                <div class="input-suffix"><input id="simWinRate" type="number" min="0.1" max="99.9" step="0.1" value="55" required /><span>%</span></div>
+                <div class="input-suffix"><input id="simWinRate" type="number" inputmode="decimal" step="any" value="55" /><span>%</span></div>
               </label>
               <label>
                 Average winner
-                <div class="input-suffix"><input id="simAvgWin" type="number" min="0.01" step="0.01" value="1.5" required /><span>units</span></div>
+                <div class="input-suffix"><input id="simAvgWin" type="number" inputmode="decimal" step="any" value="1.5" /><span>R</span></div>
+                <span class="field-help">Example: enter 1.5 when your average winner is 1.5 times your average loss.</span>
               </label>
               <label>
                 Average loser
-                <div class="input-suffix"><input id="simAvgLoss" type="number" min="0.01" step="0.01" value="1" required /><span>units</span></div>
+                <div class="input-suffix"><input id="simAvgLoss" type="number" inputmode="decimal" step="any" value="1" /><span>R</span></div>
+                <span class="field-help">Usually enter 1. You can also enter 15 and 10 for a 15% winner and 10% loser.</span>
               </label>
               <label>
                 Kelly fraction used
@@ -90,83 +92,102 @@
                 </select>
               </label>
               <label>
-                Hard risk cap per trade
-                <div class="input-suffix"><input id="simRiskCap" type="number" min="0" max="100" step="0.1" value="2" required /><span>%</span></div>
+                Maximum account risk per trade
+                <div class="input-suffix"><input id="simRiskCap" type="number" inputmode="decimal" step="any" value="2" /><span>%</span></div>
+                <span class="field-help">The simulator uses the lower of fractional Kelly or this risk limit.</span>
+              </label>
+              <label>
+                Average trades per week
+                <input id="tradesPerWeek" type="number" inputmode="decimal" step="any" value="10" />
+                <span class="field-help">This converts the number of trades into weeks, months, and years.</span>
               </label>
               <label>
                 Number of simulations
                 <select id="simulationCount">
-                  <option value="1000">1,000</option>
-                  <option value="5000" selected>5,000</option>
-                  <option value="10000">10,000</option>
-                  <option value="25000">25,000</option>
+                  <option value="1000">1,000 — faster</option>
+                  <option value="5000" selected>5,000 — recommended</option>
+                  <option value="10000">10,000 — more precise</option>
                 </select>
-              </label>
-              <label>
-                Maximum trades per path
-                <input id="maxTrades" type="number" min="10" max="50000" step="100" value="5000" required />
-              </label>
-              <label>
-                Average trades per week
-                <input id="tradesPerWeek" type="number" min="0.1" max="1000" step="0.1" value="10" required />
-              </label>
-              <label>
-                Random seed
-                <input id="randomSeed" type="number" step="1" value="42" required />
               </label>
             </div>
 
             <div id="simulatorMessage" class="message hidden" role="status"></div>
-            <button class="primary-button" type="submit">Run simulation</button>
-            <p class="microcopy">Average winner and loser may be entered in dollars, percentages, or R-multiples. Only their ratio is used. Example: a typical +15% winner and −10% loser can be entered as 15 and 10.</p>
+            <button class="primary-button" type="submit">Estimate time to goal</button>
+            <p class="microcopy">No random seed or manual trade limit is needed. The app automatically creates a repeatable simulation horizon based on your edge, target, and trading frequency.</p>
           </form>
 
           <div class="results-stack">
-            <section class="card">
+            <section class="card result-summary-card">
               <div class="section-heading">
                 <div>
-                  <p class="eyebrow">RESULTS</p>
-                  <h3>Estimated path to target</h3>
+                  <p class="eyebrow">TIME TO TARGET</p>
+                  <h3>Your estimated path</h3>
                 </div>
                 <button id="downloadCsv" class="text-button" type="button" disabled>Download CSV</button>
               </div>
 
-              <div class="metric-grid">
-                <article class="metric primary-metric">
-                  <span>Target reached</span>
-                  <strong id="reachProbability">—</strong>
-                  <small>of simulated paths</small>
-                </article>
-                <article class="metric">
-                  <span>Median trades</span>
-                  <strong id="medianTrades">—</strong>
-                  <small>among successful paths</small>
-                </article>
-                <article class="metric">
-                  <span>Estimated median time</span>
+              <div id="simulationSummary" class="simulation-summary">
+                Enter your assumptions and run the simulator to estimate the time needed to reach your goal.
+              </div>
+
+              <div class="metric-grid time-metric-grid">
+                <article class="metric primary-metric large-metric">
+                  <span>Most likely time</span>
                   <strong id="medianTime">—</strong>
-                  <small>using trades per week</small>
+                  <small>median successful path</small>
                 </article>
                 <article class="metric">
-                  <span>Middle 50%</span>
-                  <strong id="tradeRange">—</strong>
-                  <small>25th–75th percentile</small>
+                  <span>Faster outcome</span>
+                  <strong id="fastTime">—</strong>
+                  <small>25% of successful paths arrived by this time</small>
                 </article>
                 <article class="metric">
-                  <span>Median max drawdown</span>
+                  <span>Slower outcome</span>
+                  <strong id="slowTime">—</strong>
+                  <small>75% of successful paths arrived by this time</small>
+                </article>
+                <article class="metric">
+                  <span>Median trades needed</span>
+                  <strong id="medianTrades">—</strong>
+                  <small>before reaching the target</small>
+                </article>
+                <article class="metric">
+                  <span>Chance within 1 year</span>
+                  <strong id="chanceOneYear">—</strong>
+                  <small>at your entered trade frequency</small>
+                </article>
+                <article class="metric">
+                  <span>Chance within 3 years</span>
+                  <strong id="chanceThreeYears">—</strong>
+                  <small>at your entered trade frequency</small>
+                </article>
+                <article class="metric">
+                  <span>Chance within 5 years</span>
+                  <strong id="chanceFiveYears">—</strong>
+                  <small>at your entered trade frequency</small>
+                </article>
+                <article class="metric">
+                  <span>Reached in simulation</span>
+                  <strong id="reachProbability">—</strong>
+                  <small id="reachProbabilityNote">within the automatic horizon</small>
+                </article>
+                <article class="metric">
+                  <span>Median maximum drawdown</span>
                   <strong id="medianDrawdown">—</strong>
                   <small>all simulated paths</small>
                 </article>
                 <article class="metric">
-                  <span>50% drawdown risk</span>
+                  <span>Risk of a 50% drawdown</span>
                   <strong id="deepDrawdownRisk">—</strong>
-                  <small>paths touching −50%</small>
+                  <small>before the path ended</small>
                 </article>
-                <article class="metric">
-                  <span>Median ending capital</span>
-                  <strong id="medianEndingCapital">—</strong>
-                  <small>at target or max trades</small>
-                </article>
+              </div>
+
+              <div class="assumption-strip">
+                <div><span>Risk used</span><strong id="appliedRiskResult">—</strong></div>
+                <div><span>Account gain on average win</span><strong id="winImpactResult">—</strong></div>
+                <div><span>Account loss on average loss</span><strong id="lossImpactResult">—</strong></div>
+                <div><span>Automatic horizon</span><strong id="automaticHorizonResult">—</strong></div>
               </div>
             </section>
 
@@ -174,14 +195,14 @@
               <div class="section-heading">
                 <div>
                   <p class="eyebrow">SAMPLE PATHS</p>
-                  <h3>Account growth trajectories</h3>
+                  <h3>Account trajectories over time</h3>
                 </div>
                 <span class="pill">Log scale</span>
               </div>
-              <canvas id="pathChart" width="900" height="440" aria-label="Simulated account paths"></canvas>
+              <canvas id="pathChart" width="900" height="440" aria-label="Simulated account paths over time"></canvas>
               <div class="chart-legend">
                 <span><i class="legend-line target-line"></i>Target</span>
-                <span><i class="legend-line median-line"></i>Median sample path</span>
+                <span><i class="legend-line median-line"></i>Path closest to median result</span>
                 <span><i class="legend-line path-line"></i>Other sample paths</span>
               </div>
             </section>
@@ -191,7 +212,7 @@
 
       <section id="sizer" class="tab-panel">
         <div class="two-column">
-          <form id="sizerForm" class="card form-card">
+          <form id="sizerForm" class="card form-card" novalidate>
             <div class="section-heading">
               <div>
                 <p class="eyebrow">POSITION SIZING</p>
@@ -203,19 +224,19 @@
             <div class="field-grid">
               <label>
                 Account equity
-                <div class="input-prefix"><span>$</span><input id="accountEquity" type="number" min="1" step="100" value="100000" required /></div>
+                <div class="input-prefix"><span>$</span><input id="accountEquity" class="money-input" type="text" inputmode="numeric" data-max-decimals="0" data-min-decimals="0" value="100,000" autocomplete="off" /></div>
               </label>
               <label>
                 Win rate
-                <div class="input-suffix"><input id="sizeWinRate" type="number" min="0.1" max="99.9" step="0.1" value="55" required /><span>%</span></div>
+                <div class="input-suffix"><input id="sizeWinRate" type="number" inputmode="decimal" step="any" value="55" /><span>%</span></div>
               </label>
               <label>
                 Average winner
-                <input id="sizeAvgWin" type="number" min="0.01" step="0.01" value="1.5" required />
+                <div class="input-suffix"><input id="sizeAvgWin" type="number" inputmode="decimal" step="any" value="1.5" /><span>R</span></div>
               </label>
               <label>
                 Average loser
-                <input id="sizeAvgLoss" type="number" min="0.01" step="0.01" value="1" required />
+                <div class="input-suffix"><input id="sizeAvgLoss" type="number" inputmode="decimal" step="any" value="1" /><span>R</span></div>
               </label>
               <label>
                 Kelly fraction used
@@ -227,21 +248,21 @@
                 </select>
               </label>
               <label>
-                Hard risk cap
-                <div class="input-suffix"><input id="sizeRiskCap" type="number" min="0" max="100" step="0.1" value="1" required /><span>%</span></div>
+                Maximum account risk
+                <div class="input-suffix"><input id="sizeRiskCap" type="number" inputmode="decimal" step="any" value="1" /><span>%</span></div>
               </label>
               <label>
                 Entry price
-                <div class="input-prefix"><span>$</span><input id="entryPrice" type="number" min="0.0001" step="0.01" value="100" required /></div>
+                <div class="input-prefix"><span>$</span><input id="entryPrice" class="money-input" type="text" inputmode="decimal" data-max-decimals="4" data-min-decimals="2" value="100.00" autocomplete="off" /></div>
               </label>
               <label>
                 Stop price
-                <div class="input-prefix"><span>$</span><input id="stopPrice" type="number" min="0" step="0.01" value="95" required /></div>
+                <div class="input-prefix"><span>$</span><input id="stopPrice" class="money-input" type="text" inputmode="decimal" data-max-decimals="4" data-min-decimals="2" value="95.00" autocomplete="off" /></div>
               </label>
               <label>
                 Contract / share multiplier
-                <input id="unitMultiplier" type="number" min="0.0001" step="1" value="1" required />
-                <span class="field-help">Use 1 for shares, 100 for standard equity options.</span>
+                <input id="unitMultiplier" type="number" inputmode="decimal" step="any" value="1" />
+                <span class="field-help">Use 1 for shares and 100 for standard equity-option contracts.</span>
               </label>
               <label>
                 Round units to
@@ -270,13 +291,13 @@
             <div class="size-hero">
               <span>Suggested position</span>
               <strong id="positionUnits">—</strong>
-              <small id="positionUnitsLabel">shares / contracts / units</small>
+              <small>shares / contracts / units</small>
             </div>
 
             <div class="result-list">
               <div><span>Payoff ratio</span><strong id="sizePayoffRatio">—</strong></div>
               <div><span>Full Kelly</span><strong id="sizeFullKelly">—</strong></div>
-              <div><span>Applied risk</span><strong id="sizeAppliedRisk">—</strong></div>
+              <div><span>Risk actually used</span><strong id="sizeAppliedRisk">—</strong></div>
               <div><span>Dollar risk</span><strong id="sizeDollarRisk">—</strong></div>
               <div><span>Risk per unit</span><strong id="riskPerUnit">—</strong></div>
               <div><span>Position notional</span><strong id="positionNotional">—</strong></div>
@@ -287,7 +308,7 @@
 
             <div class="risk-callout">
               <strong>Practical rule</strong>
-              <p>Kelly is an upper-bound growth model. Your hard risk cap should usually control the final number, especially when estimates are based on a small sample or market conditions are changing.</p>
+              <p>Kelly is an upper-bound growth model. A fractional Kelly setting and conservative account-risk cap are generally more practical than using full Kelly.</p>
             </div>
           </section>
         </div>
@@ -298,30 +319,37 @@
           <article class="card prose-card">
             <p class="eyebrow">FORMULA</p>
             <h3>What the calculator is doing</h3>
-            <p>For a strategy with win probability <em>p</em>, loss probability <em>q = 1 − p</em>, and payoff ratio <em>b = average win ÷ average loss</em>:</p>
+            <p>For win probability <em>p</em>, loss probability <em>q = 1 − p</em>, and payoff ratio <em>b = average win ÷ average loss</em>:</p>
             <div class="formula">Full Kelly = (b × p − q) ÷ b</div>
-            <p>The result is the theoretical fraction of account equity to risk on each independent trade when a normal losing trade loses one unit of risk.</p>
+            <p>The result is the theoretical fraction of account equity to risk when a normal losing trade loses one unit of risk.</p>
           </article>
 
           <article class="card prose-card">
             <p class="eyebrow">INTERPRETATION</p>
-            <h3>Win rate is not your edge</h3>
-            <p>A 60% win rate does not automatically mean a 60% edge. A strategy can win often and still lose money if its losers are much larger than its winners. The simulator combines both win probability and payoff ratio.</p>
-            <div class="formula">Expectancy = p × b − q</div>
+            <h3>A 15% winner does not mean risking 15%</h3>
+            <p>If your average stock winner is 15% and your average loser is 10%, the payoff ratio is 1.5 to 1. If the app uses 2% account risk, an average win increases the account by about 3%, while an average loss reduces it by 2%.</p>
+            <div class="formula">Win impact = account risk × payoff ratio</div>
           </article>
 
           <article class="card prose-card">
-            <p class="eyebrow">SIMULATION</p>
-            <h3>How account paths are generated</h3>
-            <p>Each path repeatedly draws a win or loss using your entered win rate. A win increases equity by the applied risk fraction multiplied by the payoff ratio. A loss reduces equity by the applied risk fraction.</p>
-            <p>The process stops when the path reaches the target or hits the maximum number of trades.</p>
+            <p class="eyebrow">TIME ESTIMATE</p>
+            <h3>How the goal timeline is calculated</h3>
+            <p>Each simulated trade is randomly recorded as a win or loss using your win rate. Equity compounds after every result. The app records the first trade on which each path reaches the target, then converts those trades into calendar time using your trades per week.</p>
+            <p>The most likely time is the median of successful simulated paths. Faster and slower estimates show the 25th and 75th percentiles.</p>
+          </article>
+
+          <article class="card prose-card">
+            <p class="eyebrow">AUTOMATIC SETTINGS</p>
+            <h3>Why seed and maximum trades were removed</h3>
+            <p>A random seed is only a technical tool used to reproduce the exact same random sequence. It does not describe your strategy, so the app now creates it automatically from your inputs.</p>
+            <p>A simulation still needs a safety horizon, but the app now calculates one automatically and shows it in the results instead of asking you to choose an arbitrary maximum-trades number.</p>
           </article>
 
           <article class="card prose-card warning-card">
             <p class="eyebrow">LIMITATIONS</p>
             <h3>What Kelly does not know</h3>
             <p>Real trades are not perfectly independent. Slippage, gaps, changing volatility, strategy decay, correlated positions, taxes, fees, and estimation error can all make realized results worse than the model.</p>
-            <p>Use historical data across enough trades, test different regimes, and favor fractional Kelly plus a conservative hard cap.</p>
+            <p>Use historical data across enough trades, test different market regimes, and treat the output as a range rather than a promise.</p>
           </article>
         </div>
       </section>
