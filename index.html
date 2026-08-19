@@ -3,9 +3,9 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <meta name="description" content="A no-leverage Kelly allocation calculator, trading goal simulator, and risk-of-ruin model." />
-  <title>KellyLab V6.2</title>
-  <!-- V6.2 is self-contained: all simulation code and styles are embedded in this file. -->
+  <meta name="description" content="A portfolio-level Kelly allocation calculator, trading goal simulator, and risk-of-ruin model with optional margin up to 150% exposure." />
+  <title>KellyLab V7.0</title>
+  <!-- V7.0 is self-contained: portfolio-level Kelly budgets, optional 150% margin, and capital-aware simulation. -->
   <style>
 :root {
   --bg: #f3f5f8;
@@ -75,6 +75,13 @@ label { display: grid; gap: 7px; color: var(--text); font-size: 14px; font-weigh
 label small, .fine-print { color: var(--muted); font-size: 12px; line-height: 1.45; font-weight: 500; }
 input, select { width: 100%; min-height: 45px; border-radius: 10px; border: 1px solid var(--border); background: var(--surface-2); color: var(--text); padding: 10px 12px; outline: none; }
 input:focus, select:focus { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(50, 104, 232, .13); }
+
+.checkbox-row { margin-top: 16px; display: flex; align-items: flex-start; gap: 10px; padding: 13px 14px; border: 1px solid var(--border); border-radius: 11px; background: var(--surface-2); }
+.checkbox-row input[type="checkbox"] { width: 18px; height: 18px; min-height: 0; margin: 2px 0 0; flex: 0 0 auto; accent-color: var(--accent); }
+.checkbox-row .checkbox-copy { display: grid; gap: 3px; }
+.checkbox-row strong { font-size: 14px; }
+.checkbox-row small { color: var(--muted); font-weight: 500; line-height: 1.45; }
+.subsection-title { margin: 24px 0 10px; font-size: 15px; }
 .money-wrap, .suffix-wrap { position: relative; display: flex; align-items: center; }
 .money-wrap > span { position: absolute; left: 12px; color: var(--muted); z-index: 1; }
 .money-wrap input { padding-left: 27px; }
@@ -147,7 +154,7 @@ td strong { color: var(--text); }
     <header class="topbar">
       <div>
         <p class="eyebrow">TRADING ALLOCATION TOOL</p>
-        <h1>Kelly<span>Lab</span> <small class="build-badge">V6.2</small></h1>
+        <h1>Kelly<span>Lab</span> <small class="build-badge">V7.0</small></h1>
       </div>
       <button id="themeToggle" class="icon-button" type="button" aria-label="Toggle dark mode">◐</button>
     </header>
@@ -228,6 +235,11 @@ td strong { color: var(--text); }
               </label>
             </div>
 
+            <label class="checkbox-row">
+              <input id="allowMarginGoal" type="checkbox" />
+              <span class="checkbox-copy"><strong>Use margin — maximum 150% total exposure</strong><small>Unchecked: the portfolio cannot exceed 100% of equity. Checked: Kelly may use up to 150% of equity across all open positions. Margin interest is not included.</small></span>
+            </label>
+
             <div id="goalError" class="message hidden" role="alert"></div>
             <button class="primary-button" type="submit">Estimate time to goal</button>
             <p class="fine-print">No correlation adjustment is included. Trade arrivals are random, holding periods vary around your average, and each closed trade is independently modeled as either your average winner or average loser.</p>
@@ -236,8 +248,8 @@ td strong { color: var(--text); }
           <div class="results-stack">
             <section class="card">
               <div class="section-title">
-                <div><p class="eyebrow">KELLY OUTPUT</p><h3>Suggested capital per trade</h3></div>
-                <span class="pill">No leverage</span>
+                <div><p class="eyebrow">KELLY OUTPUT</p><h3>Portfolio budget and target trade size</h3></div>
+                <span id="goalMarginPill" class="pill">Margin off</span>
               </div>
               <div id="goalKellyCards" class="kelly-card-grid placeholder-grid">
                 <p>Run the simulator to calculate full, half, and quarter Kelly.</p>
@@ -255,8 +267,9 @@ td strong { color: var(--text); }
                   <thead>
                     <tr>
                       <th>Kelly level</th>
-                      <th>Allocation</th>
-                      <th>Starting 1R</th>
+                      <th>Portfolio budget</th>
+                      <th>Target size / trade</th>
+                      <th>Starting 1R / trade</th>
                       <th>Median closed trades</th>
                       <th>Median calendar time</th>
                       <th>Target chance</th>
@@ -265,11 +278,18 @@ td strong { color: var(--text); }
                     </tr>
                   </thead>
                   <tbody id="goalResultsBody">
-                    <tr><td colspan="8" class="empty-cell">Run the simulator to see results.</td></tr>
+                    <tr><td colspan="9" class="empty-cell">Run the simulator to see results.</td></tr>
                   </tbody>
                 </table>
               </div>
-              <p id="goalSummary" class="summary-text">The result will explain exactly how much each average win and loss changes the account.</p>
+              <h4 class="subsection-title">Portfolio utilization</h4>
+              <div class="table-wrap">
+                <table>
+                  <thead><tr><th>Kelly level</th><th>Avg capital deployed</th><th>Avg position size</th><th>Avg open positions</th><th>Opportunities funded</th><th>Opportunities skipped</th></tr></thead>
+                  <tbody id="utilizationBody"><tr><td colspan="6" class="empty-cell">Run the simulator to see portfolio utilization.</td></tr></tbody>
+                </table>
+              </div>
+              <p id="goalSummary" class="summary-text">The result will explain the Kelly portfolio budget, target trade size, and how capital is used while trades overlap.</p>
               <div id="cadenceNote" class="info-box hidden"></div>
             </section>
 
@@ -324,6 +344,10 @@ td strong { color: var(--text); }
                 </select>
               </label>
             </div>
+            <label class="checkbox-row">
+              <input id="allowMarginSize" type="checkbox" />
+              <span class="checkbox-copy"><strong>Use margin — maximum 150% total exposure</strong><small>Lets the one-trade Kelly calculator suggest up to 150% of account equity when the Kelly formula calls for it.</small></span>
+            </label>
             <div id="sizeError" class="message hidden" role="alert"></div>
             <button class="primary-button" type="submit">Calculate Kelly size</button>
           </form>
@@ -331,7 +355,7 @@ td strong { color: var(--text); }
           <section class="card">
             <div class="section-title">
               <div><p class="eyebrow">SIZING RESULTS</p><h3>Full, half, and quarter Kelly</h3></div>
-              <span class="pill">No leverage</span>
+              <span id="sizeMarginPill" class="pill">Margin off</span>
             </div>
             <div class="table-wrap">
               <table>
@@ -361,12 +385,12 @@ td strong { color: var(--text); }
           <p class="eyebrow">MODEL DEFINITION</p>
           <h3>What the app calculates</h3>
           <div class="method-grid">
-            <article><h4>Kelly allocation</h4><p>The calculator maximizes expected logarithmic account growth using your win probability and percentage return on winning and losing positions.</p></article>
-            <article><h4>No leverage</h4><p>If the formula suggests placing more than the account balance into a trade, the app uses 100% of equity. Capital committed to an open trade is unavailable for new trades until that position closes.</p></article>
-            <article><h4>Dollar R</h4><p>1R equals the suggested bet amount multiplied by the average losing-trade percentage. A $100,000 bet with a 5% average loss has a $5,000 R.</p></article>
+            <article><h4>Portfolio Kelly budget</h4><p>Full, half, and quarter Kelly set the maximum total capital budget across all open trades. Half Kelly can never silently drift back toward a Full-Kelly exposure.</p></article>
+            <article><h4>Target trade size</h4><p>The portfolio budget is divided by the expected number of overlapping trades, estimated from opportunities per week × average holding days ÷ 7. Actual arrivals and holding periods still vary randomly.</p></article>
+            <article><h4>Optional margin</h4><p>Margin off caps total exposure at 100% of equity. Margin on permits up to 150%. If the Kelly formula is below those limits, the Kelly budget remains lower. Margin interest is not included.</p></article>
             <article><h4>Risk of ruin</h4><p>Risk of ruin is the percentage of simulated paths that touch your chosen dollar threshold before reaching the target within the selected horizon.</p></article>
           </div>
-          <div class="warning-box"><strong>Important:</strong> Trade opportunities arrive randomly around your weekly average, holding periods vary around the entered average, and open positions tie up capital until exit. The model still assumes trade outcomes are independent and each closed trade equals the entered average win or loss. Real results include wider outcome dispersion, slippage, gaps, regime changes, and correlation.</div>
+          <div class="warning-box"><strong>Important:</strong> Trade opportunities arrive randomly around your weekly average, holding periods vary around the entered average, and open positions tie up capital until exit. The model still assumes trade outcomes are independent and each closed trade equals the entered average win or loss. If equity falls enough that existing positions exceed the selected Kelly budget, the model proportionally trims open positions back to budget. Real results include wider outcome dispersion, slippage, gaps, margin interest, regime changes, and correlation.</div>
         </section>
       </section>
     </main>
@@ -386,404 +410,230 @@ td strong { color: var(--text); }
     quarter: { label: 'Quarter Kelly', factor: 0.25 },
   };
 
-  function clamp(value, min, max) {
-    return Math.min(Math.max(value, min), max);
-  }
+  function clamp(value, min, max) { return Math.min(Math.max(value, min), max); }
+  function parsePercent(value) { return Number(value) / 100; }
 
-  function parsePercent(value) {
-    return Number(value) / 100;
-  }
-
-  function calculateKelly(winRatePct, avgWinPct, avgLossPct, factor = 1) {
+  function calculateKelly(winRatePct, avgWinPct, avgLossPct, factor = 1, maxExposureFraction = 1) {
     const p = parsePercent(winRatePct);
     const q = 1 - p;
     const gain = parsePercent(avgWinPct);
     const loss = parsePercent(avgLossPct);
-
-    if (!(p > 0 && p < 1) || !(gain > 0) || !(loss > 0 && loss < 1)) {
-      return {
-        valid: false,
-        rawFullFraction: 0,
-        rawFraction: 0,
-        allocationFraction: 0,
-        constrained: false,
-        expectancyPosition: 0,
-        expectedLogGrowth: Number.NEGATIVE_INFINITY,
-      };
+    if (!(p > 0 && p < 1) || !(gain > 0) || !(loss > 0 && loss < 1) || !(maxExposureFraction > 0)) {
+      return { valid: false, rawFullFraction: 0, rawFraction: 0, allocationFraction: 0, constrained: false, expectancyPosition: 0, expectedLogGrowth: Number.NEGATIVE_INFINITY };
     }
-
-    // Maximizes p*ln(1+f*gain) + q*ln(1-f*loss).
     const rawFullFraction = (p * gain - q * loss) / (gain * loss);
     const rawFraction = Math.max(0, rawFullFraction * factor);
-
-    // No leverage in this version: one trade cannot use more than 100% of equity.
-    const allocationFraction = clamp(rawFraction, 0, 1);
-    const constrained = rawFraction > 1;
+    const allocationFraction = clamp(rawFraction, 0, maxExposureFraction);
+    const constrained = rawFraction > maxExposureFraction;
     const expectancyPosition = p * gain - q * loss;
-    const expectedLogGrowth = allocationFraction === 0
-      ? 0
-      : p * Math.log1p(allocationFraction * gain)
-        + q * Math.log1p(-allocationFraction * loss);
-
-    return {
-      valid: true,
-      rawFullFraction,
-      rawFraction,
-      allocationFraction,
-      constrained,
-      expectancyPosition,
-      expectedLogGrowth,
-    };
+    const expectedLogGrowth = allocationFraction === 0 ? 0 : p * Math.log1p(allocationFraction * gain) + q * Math.log1p(-allocationFraction * loss);
+    return { valid: true, rawFullFraction, rawFraction, allocationFraction, constrained, expectancyPosition, expectedLogGrowth };
   }
 
-  function createScenarioSet(winRatePct, avgWinPct, avgLossPct) {
-    return Object.entries(FACTORS).map(([key, item]) => ({
-      key,
-      label: item.label,
-      factor: item.factor,
-      ...calculateKelly(winRatePct, avgWinPct, avgLossPct, item.factor),
-    }));
+  function createScenarioSet(winRatePct, avgWinPct, avgLossPct, maxExposureFraction = 1) {
+    return Object.entries(FACTORS).map(([key, item]) => ({ key, label: item.label, factor: item.factor, ...calculateKelly(winRatePct, avgWinPct, avgLossPct, item.factor, maxExposureFraction) }));
   }
 
   function hashString(text) {
     let h = 2166136261 >>> 0;
-    for (let i = 0; i < text.length; i += 1) {
-      h ^= text.charCodeAt(i);
-      h = Math.imul(h, 16777619);
-    }
+    for (let i = 0; i < text.length; i += 1) { h ^= text.charCodeAt(i); h = Math.imul(h, 16777619); }
     return h >>> 0;
   }
-
   function mulberry32(seed) {
     let a = seed >>> 0;
-    return function random() {
-      a |= 0;
-      a = (a + 0x6D2B79F5) | 0;
-      let t = Math.imul(a ^ (a >>> 15), 1 | a);
-      t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
-      return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
-    };
+    return function random() { a |= 0; a = (a + 0x6D2B79F5) | 0; let t = Math.imul(a ^ (a >>> 15), 1 | a); t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return ((t ^ (t >>> 14)) >>> 0) / 4294967296; };
   }
-
   function percentile(sorted, p) {
     if (!sorted.length) return null;
-    const index = (sorted.length - 1) * p;
-    const lower = Math.floor(index);
-    const upper = Math.ceil(index);
+    const index = (sorted.length - 1) * p, lower = Math.floor(index), upper = Math.ceil(index);
     if (lower === upper) return sorted[lower];
     const weight = index - lower;
     return sorted[lower] * (1 - weight) + sorted[upper] * weight;
   }
-
   function summarize(values) {
     if (!values.length) return { p25: null, median: null, p75: null };
     const sorted = [...values].sort((a, b) => a - b);
-    return {
-      p25: percentile(sorted, 0.25),
-      median: percentile(sorted, 0.5),
-      p75: percentile(sorted, 0.75),
-    };
+    return { p25: percentile(sorted, 0.25), median: percentile(sorted, 0.5), p75: percentile(sorted, 0.75) };
   }
-
-
   function summarizeCensoredTarget(values, totalPaths) {
     if (!values.length || !(totalPaths > 0)) return { p25: null, median: null, p75: null };
     const sorted = [...values].sort((a, b) => a - b);
-    const at = (q) => {
-      const requiredRank = Math.ceil(q * totalPaths);
-      if (sorted.length < requiredRank) return null;
-      return sorted[Math.max(0, requiredRank - 1)];
-    };
+    const at = (q) => { const requiredRank = Math.ceil(q * totalPaths); if (sorted.length < requiredRank) return null; return sorted[Math.max(0, requiredRank - 1)]; };
     return { p25: at(0.25), median: at(0.5), p75: at(0.75) };
   }
-
   function standardNormal(random) {
-    let u1 = random();
-    let u2 = random();
+    let u1 = random(), u2 = random();
     if (u1 <= Number.EPSILON) u1 = Number.EPSILON;
     return Math.sqrt(-2 * Math.log(u1)) * Math.cos(2 * Math.PI * u2);
   }
-
   function poisson(lambda, random) {
     if (!(lambda > 0)) return 0;
-    if (lambda >= 30) {
-      return Math.max(0, Math.round(lambda + Math.sqrt(lambda) * standardNormal(random)));
-    }
-    const limit = Math.exp(-lambda);
-    let product = 1;
-    let k = 0;
-    do {
-      k += 1;
-      product *= random();
-    } while (product > limit);
+    if (lambda >= 30) return Math.max(0, Math.round(lambda + Math.sqrt(lambda) * standardNormal(random)));
+    const limit = Math.exp(-lambda); let product = 1, k = 0;
+    do { k += 1; product *= random(); } while (product > limit);
     return k - 1;
   }
-
-  // Gamma(shape=4) distribution with mean = averageDays and CV = 50%.
-  // This keeps holding periods positive while allowing realistic variation around the average.
   function sampleHoldingDays(averageDays, random) {
-    const theta = averageDays / 4;
-    let sum = 0;
-    for (let i = 0; i < 4; i += 1) {
-      let u = random();
-      if (u <= Number.EPSILON) u = Number.EPSILON;
-      sum += -Math.log(u) * theta;
-    }
+    const theta = averageDays / 4; let sum = 0;
+    for (let i = 0; i < 4; i += 1) { let u = random(); if (u <= Number.EPSILON) u = Number.EPSILON; sum += -Math.log(u) * theta; }
     return Math.max(1, Math.round(sum));
   }
+  function grossExposure(openPositions) { return openPositions.reduce((sum, position) => sum + position.bet, 0); }
+  function portfolioEquity(cash, openPositions) { return cash + grossExposure(openPositions); }
 
-  function portfolioEquity(cash, openPositions) {
-    let equity = cash;
-    for (let i = 0; i < openPositions.length; i += 1) equity += openPositions[i].bet;
-    return equity;
+  // Keeps already-open positions inside the selected Kelly portfolio budget after equity changes.
+  function trimToBudget(cash, openPositions, allocationFraction) {
+    let equity = portfolioEquity(cash, openPositions);
+    let gross = grossExposure(openPositions);
+    const maxGross = Math.max(0, equity * allocationFraction);
+    if (!(gross > maxGross) || !(gross > 0)) return { cash, openPositions, equity, gross };
+    const scale = maxGross / gross;
+    let released = 0;
+    openPositions.forEach((position) => { const old = position.bet; position.bet *= scale; released += old - position.bet; });
+    cash += released;
+    gross = grossExposure(openPositions);
+    equity = portfolioEquity(cash, openPositions);
+    return { cash, openPositions, equity, gross };
   }
 
   function simulateScenario(params, scenario, seedText) {
-    const {
-      startCapital,
-      targetCapital,
-      ruinCapital,
-      winRatePct,
-      avgWinPct,
-      avgLossPct,
-      tradesPerWeek,
-      holdingPeriodDays,
-      horizonYears,
-      simulations,
-    } = params;
-
-    const p = parsePercent(winRatePct);
-    const gain = parsePercent(avgWinPct);
-    const loss = parsePercent(avgLossPct);
+    const { startCapital, targetCapital, ruinCapital, winRatePct, avgWinPct, avgLossPct, tradesPerWeek, holdingPeriodDays, horizonYears, simulations } = params;
+    const p = parsePercent(winRatePct), gain = parsePercent(avgWinPct), loss = parsePercent(avgLossPct);
     const allocation = scenario.allocationFraction;
+    const expectedConcurrentTrades = Math.max(1, tradesPerWeek * holdingPeriodDays / 7);
+    const targetTradeFraction = allocation / expectedConcurrentTrades;
     const maxDays = Math.max(1, Math.floor(horizonYears * 365.25));
     const dailyArrivalRate = tradesPerWeek / 7;
     const random = mulberry32(hashString(`${seedText}|${scenario.key}`));
 
-    const targetDays = [];
-    const targetClosedTrades = [];
-    const maxDrawdowns = [];
-    const endings = [];
-    const fundedRates = [];
+    const targetDays = [], targetClosedTrades = [], maxDrawdowns = [], endings = [], fundedRates = [], skippedRates = [], deployedFractions = [], positionSizeFractions = [], averageOpenPositions = [];
     const samplePaths = [];
-    let targetCount = 0;
-    let ruinCount = 0;
-    let unresolvedCount = 0;
-    let drawdown50Count = 0;
-    let drawdown75Count = 0;
-    let totalOpportunities = 0;
-    let totalFunded = 0;
-    let totalSkipped = 0;
-
-    const sampleEveryDays = Math.max(1, Math.ceil(maxDays / 180));
-    const desiredSamples = 24;
+    let targetCount = 0, ruinCount = 0, unresolvedCount = 0, drawdown50Count = 0, drawdown75Count = 0;
+    let totalOpportunities = 0, totalFunded = 0, totalPartial = 0, totalSkipped = 0;
+    const sampleEveryDays = Math.max(1, Math.ceil(maxDays / 180)), desiredSamples = 24;
 
     for (let sim = 0; sim < simulations; sim += 1) {
-      let cash = startCapital;
-      let openPositions = [];
-      let equity = startCapital;
-      let peak = startCapital;
-      let maxDrawdown = 0;
-      let outcome = 'unresolved';
-      let endingDay = maxDays;
-      let opportunities = 0;
-      let funded = 0;
-      let skipped = 0;
-      let closedTrades = 0;
+      let cash = startCapital, openPositions = [], equity = startCapital, peak = startCapital, maxDrawdown = 0;
+      let outcome = 'unresolved', endingDay = maxDays, opportunities = 0, funded = 0, partial = 0, skipped = 0, closedTrades = 0;
+      let exposureSum = 0, openCountSum = 0, observedDays = 0, positionFractionSum = 0, positionEntries = 0;
       const capture = sim < desiredSamples;
       const points = capture ? [{ day: 0, equity }] : null;
 
       if (allocation <= 0) {
-        unresolvedCount += 1;
-        maxDrawdowns.push(0);
-        endings.push(equity);
-        fundedRates.push(0);
+        unresolvedCount += 1; maxDrawdowns.push(0); endings.push(equity); fundedRates.push(0); skippedRates.push(1); deployedFractions.push(0); positionSizeFractions.push(0); averageOpenPositions.push(0);
         if (capture) samplePaths.push(points);
         continue;
       }
 
       for (let day = 1; day <= maxDays; day += 1) {
-        // Positions close before new opportunities arrive for the day, freeing their capital.
         if (openPositions.length) {
           const remaining = [];
-          for (let i = 0; i < openPositions.length; i += 1) {
-            const position = openPositions[i];
-            if (position.exitDay <= day) {
-              const pnl = position.bet * (position.won ? gain : -loss);
-              cash += position.bet + pnl;
-              closedTrades += 1;
-            } else {
-              remaining.push(position);
-            }
+          for (const position of openPositions) {
+            if (position.exitDay <= day) { const pnl = position.bet * (position.won ? gain : -loss); cash += position.bet + pnl; closedTrades += 1; }
+            else remaining.push(position);
           }
           openPositions = remaining;
         }
 
-        equity = portfolioEquity(cash, openPositions);
+        let trimmed = trimToBudget(cash, openPositions, allocation);
+        cash = trimmed.cash; openPositions = trimmed.openPositions; equity = trimmed.equity;
         if (!Number.isFinite(equity) || equity < 0) equity = 0;
         if (equity > peak) peak = equity;
         const drawdown = peak > 0 ? 1 - equity / peak : 1;
         if (drawdown > maxDrawdown) maxDrawdown = drawdown;
 
-        if (equity >= targetCapital) {
-          outcome = 'target';
-          endingDay = day;
-          targetCount += 1;
-          targetDays.push(day);
-          targetClosedTrades.push(closedTrades);
-          if (capture) points.push({ day, equity });
-          break;
-        }
-        if (equity <= ruinCapital) {
-          outcome = 'ruin';
-          endingDay = day;
-          ruinCount += 1;
-          if (capture) points.push({ day, equity });
-          break;
-        }
+        if (equity >= targetCapital) { outcome = 'target'; endingDay = day; targetCount += 1; targetDays.push(day); targetClosedTrades.push(closedTrades); if (capture) points.push({ day, equity }); break; }
+        if (equity <= ruinCapital) { outcome = 'ruin'; endingDay = day; ruinCount += 1; if (capture) points.push({ day, equity }); break; }
 
         const arrivals = poisson(dailyArrivalRate, random);
         for (let a = 0; a < arrivals; a += 1) {
           opportunities += 1;
           equity = portfolioEquity(cash, openPositions);
-          const desiredBet = equity * allocation;
-          const actualBet = Math.min(desiredBet, cash);
+          const gross = grossExposure(openPositions);
+          const portfolioBudget = equity * allocation;
+          const availableBudget = Math.max(0, portfolioBudget - gross);
+          const targetBet = equity * targetTradeFraction;
+          const actualBet = Math.min(targetBet, availableBudget);
 
-          if (!(actualBet > 0)) {
-            skipped += 1;
-            continue;
-          }
-
+          if (!(actualBet > Math.max(1e-9, equity * 1e-12))) { skipped += 1; continue; }
+          if (actualBet + 1e-9 < targetBet) partial += 1; else funded += 1;
           cash -= actualBet;
           const holdDays = sampleHoldingDays(holdingPeriodDays, random);
-          openPositions.push({
-            bet: actualBet,
-            won: random() < p,
-            exitDay: day + holdDays,
-          });
-          funded += 1;
+          openPositions.push({ bet: actualBet, won: random() < p, exitDay: day + holdDays });
+          positionFractionSum += equity > 0 ? actualBet / equity : 0;
+          positionEntries += 1;
         }
 
         equity = portfolioEquity(cash, openPositions);
+        const gross = grossExposure(openPositions);
+        observedDays += 1;
+        exposureSum += equity > 0 ? gross / equity : 0;
+        openCountSum += openPositions.length;
         if (capture && (day % sampleEveryDays === 0 || day === maxDays)) points.push({ day, equity });
       }
 
       if (outcome === 'unresolved') unresolvedCount += 1;
       if (maxDrawdown >= 0.5) drawdown50Count += 1;
       if (maxDrawdown >= 0.75) drawdown75Count += 1;
-      maxDrawdowns.push(maxDrawdown);
-      endings.push(equity);
-      fundedRates.push(opportunities > 0 ? funded / opportunities : 0);
-      totalOpportunities += opportunities;
-      totalFunded += funded;
-      totalSkipped += skipped;
+      maxDrawdowns.push(maxDrawdown); endings.push(equity);
+      const participated = funded + partial;
+      fundedRates.push(opportunities > 0 ? participated / opportunities : 0);
+      skippedRates.push(opportunities > 0 ? skipped / opportunities : 0);
+      deployedFractions.push(observedDays > 0 ? exposureSum / observedDays : 0);
+      positionSizeFractions.push(positionEntries > 0 ? positionFractionSum / positionEntries : 0);
+      averageOpenPositions.push(observedDays > 0 ? openCountSum / observedDays : 0);
+      totalOpportunities += opportunities; totalFunded += funded; totalPartial += partial; totalSkipped += skipped;
 
-      if (capture) {
-        const last = points[points.length - 1];
-        if (!last || last.day !== endingDay) points.push({ day: endingDay, equity });
-        samplePaths.push(points);
-      }
+      if (capture) { const last = points[points.length - 1]; if (!last || last.day !== endingDay) points.push({ day: endingDay, equity }); samplePaths.push(points); }
     }
 
-    // Target-time quantiles are unconditional across all simulation paths. If fewer
-    // than 50% of paths hit the target within the horizon, the median is "not reached".
-    const targetDayStats = summarizeCensoredTarget(targetDays, simulations);
-    const targetTradeStats = summarizeCensoredTarget(targetClosedTrades, simulations);
-    const drawdownStats = summarize(maxDrawdowns);
-    const endingStats = summarize(endings);
-    const fundedRateStats = summarize(fundedRates);
+    const targetDayStats = summarizeCensoredTarget(targetDays, simulations), targetTradeStats = summarizeCensoredTarget(targetClosedTrades, simulations);
+    const drawdownStats = summarize(maxDrawdowns), endingStats = summarize(endings), fundedRateStats = summarize(fundedRates), skippedRateStats = summarize(skippedRates), deployedStats = summarize(deployedFractions), positionSizeStats = summarize(positionSizeFractions), openPositionStats = summarize(averageOpenPositions);
     const targetWithinOneYear = targetDays.filter((day) => day <= 365.25).length;
 
     return {
-      key: scenario.key,
-      label: scenario.label,
-      factor: scenario.factor,
-      allocationFraction: scenario.allocationFraction,
-      rawAllocationFraction: scenario.rawFraction,
-      constrained: scenario.constrained,
-      startingBet: startCapital * scenario.allocationFraction,
-      startingR: startCapital * scenario.allocationFraction * loss,
-      startingWinner: startCapital * scenario.allocationFraction * gain,
-      startingLoser: startCapital * scenario.allocationFraction * loss,
-      winAccountImpact: scenario.allocationFraction * gain,
-      lossAccountImpact: scenario.allocationFraction * loss,
-      expectedLogGrowth: scenario.expectedLogGrowth,
-      simulations,
-      maxDays,
-      targetCount,
-      ruinCount,
-      unresolvedCount,
-      targetProbability: targetCount / simulations,
-      ruinProbability: ruinCount / simulations,
-      unresolvedProbability: unresolvedCount / simulations,
-      drawdown50Probability: drawdown50Count / simulations,
-      drawdown75Probability: drawdown75Count / simulations,
-      oneYearProbability: targetWithinOneYear / simulations,
-      targetDays: targetDayStats,
-      targetTrades: targetTradeStats,
-      maxDrawdown: drawdownStats,
-      endingCapital: endingStats,
-      fundedRate: fundedRateStats,
-      overallFundedRate: totalOpportunities > 0 ? totalFunded / totalOpportunities : 0,
-      totalOpportunities,
-      totalFunded,
-      totalSkipped,
-      samplePaths,
+      key: scenario.key, label: scenario.label, factor: scenario.factor, allocationFraction: allocation, rawAllocationFraction: scenario.rawFraction, constrained: scenario.constrained,
+      expectedConcurrentTrades, targetTradeFraction,
+      startingPortfolioBudget: startCapital * allocation,
+      startingBet: startCapital * targetTradeFraction,
+      startingR: startCapital * targetTradeFraction * loss,
+      startingWinner: startCapital * targetTradeFraction * gain,
+      startingLoser: startCapital * targetTradeFraction * loss,
+      winAccountImpact: targetTradeFraction * gain, lossAccountImpact: targetTradeFraction * loss,
+      simulations, maxDays, targetCount, ruinCount, unresolvedCount,
+      targetProbability: targetCount / simulations, ruinProbability: ruinCount / simulations, unresolvedProbability: unresolvedCount / simulations,
+      drawdown50Probability: drawdown50Count / simulations, drawdown75Probability: drawdown75Count / simulations, oneYearProbability: targetWithinOneYear / simulations,
+      targetDays: targetDayStats, targetTrades: targetTradeStats, maxDrawdown: drawdownStats, endingCapital: endingStats,
+      fundedRate: fundedRateStats, skippedRate: skippedRateStats, deployedFraction: deployedStats, averagePositionSizeFraction: positionSizeStats, averageOpenPositions: openPositionStats,
+      overallFundedRate: totalOpportunities > 0 ? (totalFunded + totalPartial) / totalOpportunities : 0,
+      overallSkippedRate: totalOpportunities > 0 ? totalSkipped / totalOpportunities : 0,
+      totalOpportunities, totalFunded, totalPartial, totalSkipped, samplePaths,
     };
   }
 
   function runSimulation(params) {
-    const scenarios = createScenarioSet(params.winRatePct, params.avgWinPct, params.avgLossPct);
+    const maxExposureFraction = params.allowMargin ? 1.5 : 1;
+    const scenarios = createScenarioSet(params.winRatePct, params.avgWinPct, params.avgLossPct, maxExposureFraction);
     const seedText = JSON.stringify(params);
     return scenarios.map((scenario) => simulateScenario(params, scenario, seedText));
   }
 
   function calculatePositionRows(params) {
-    const {
-      accountEquity,
-      winRatePct,
-      avgWinPct,
-      avgLossPct,
-      entryPrice,
-      multiplier,
-      roundingIncrement,
-    } = params;
-
-    const gain = parsePercent(avgWinPct);
-    const loss = parsePercent(avgLossPct);
-    const unitCost = entryPrice * multiplier;
-
-    return createScenarioSet(winRatePct, avgWinPct, avgLossPct).map((scenario) => {
+    const { accountEquity, winRatePct, avgWinPct, avgLossPct, entryPrice, multiplier, roundingIncrement, allowMargin } = params;
+    const gain = parsePercent(avgWinPct), loss = parsePercent(avgLossPct), unitCost = entryPrice * multiplier;
+    const maxExposureFraction = allowMargin ? 1.5 : 1;
+    return createScenarioSet(winRatePct, avgWinPct, avgLossPct, maxExposureFraction).map((scenario) => {
       const suggestedBet = accountEquity * scenario.allocationFraction;
       const rawUnits = unitCost > 0 ? suggestedBet / unitCost : 0;
       const units = Math.max(0, Math.floor(rawUnits / roundingIncrement) * roundingIncrement);
       const actualBet = units * unitCost;
       const oneR = actualBet * loss;
-      const averageWinner = actualBet * gain;
-      const averageLoser = oneR;
-
-      return {
-        ...scenario,
-        suggestedBet,
-        units,
-        actualBet,
-        oneR,
-        averageWinner,
-        averageLoser,
-      };
+      return { ...scenario, suggestedBet, units, actualBet, oneR, averageWinner: actualBet * gain, averageLoser: oneR };
     });
   }
 
-  return {
-    FACTORS,
-    calculateKelly,
-    createScenarioSet,
-    runSimulation,
-    calculatePositionRows,
-    sampleHoldingDays,
-  };
+  return { FACTORS, calculateKelly, createScenarioSet, runSimulation, calculatePositionRows, sampleHoldingDays };
 });
-
 </script>
   <script>
 (() => {
@@ -797,11 +647,11 @@ td strong { color: var(--text); }
     goal: {
       startCapital: '100,000', targetCapital: '5,000,000', ruinCapital: '10,000',
       goalWinRate: '60', goalAvgWin: '10', goalAvgLoss: '5', tradesPerWeek: '10', holdingPeriodDays: '1',
-      horizonYears: '5', simulationCount: '1000',
+      horizonYears: '5', simulationCount: '1000', allowMarginGoal: false,
     },
     size: {
       accountEquity: '100,000', sizeWinRate: '60', sizeAvgWin: '10', sizeAvgLoss: '5',
-      entryPrice: '100.00', unitMultiplier: '1', roundingIncrement: '1',
+      entryPrice: '100.00', unitMultiplier: '1', roundingIncrement: '1', allowMarginSize: false,
     },
   };
 
@@ -884,7 +734,8 @@ td strong { color: var(--text); }
   }
 
   function updateHero(winRate = Number($('goalWinRate').value), avgWin = Number($('goalAvgWin').value), avgLoss = Number($('goalAvgLoss').value)) {
-    const scenarios = core.createScenarioSet(winRate, avgWin, avgLoss);
+    const maxExposure = $('allowMarginGoal').checked ? 1.5 : 1;
+    const scenarios = core.createScenarioSet(winRate, avgWin, avgLoss, maxExposure);
     const map = Object.fromEntries(scenarios.map((item) => [item.key, item]));
     $('heroFull').textContent = percent(map.full.allocationFraction, 1);
     $('heroHalf').textContent = percent(map.half.allocationFraction, 1);
@@ -892,7 +743,17 @@ td strong { color: var(--text); }
   }
 
   ['goalWinRate', 'goalAvgWin', 'goalAvgLoss'].forEach((id) => $(id).addEventListener('input', () => updateHero()));
-  updateHero();
+  function syncMargin(sourceId) {
+    const checked = $(sourceId).checked;
+    $('allowMarginGoal').checked = checked;
+    $('allowMarginSize').checked = checked;
+    $('goalMarginPill').textContent = checked ? 'Margin up to 150%' : 'Margin off';
+    $('sizeMarginPill').textContent = checked ? 'Margin up to 150%' : 'Margin off';
+    updateHero();
+  }
+  $('allowMarginGoal').addEventListener('change', () => syncMargin('allowMarginGoal'));
+  $('allowMarginSize').addEventListener('change', () => syncMargin('allowMarginSize'));
+  syncMargin('allowMarginGoal');
 
   document.querySelectorAll('.tab').forEach((button) => {
     button.addEventListener('click', () => {
@@ -918,6 +779,7 @@ td strong { color: var(--text); }
       holdingPeriodDays: Number($('holdingPeriodDays').value),
       horizonYears: Number($('horizonYears').value),
       simulations: Number($('simulationCount').value),
+      allowMargin: $('allowMarginGoal').checked,
     };
   }
 
@@ -939,16 +801,17 @@ td strong { color: var(--text); }
         <h4>${result.label}</h4>
         <div class="allocation">${percent(result.allocationFraction, 1)}</div>
         <dl>
-          <dt>Starting bet</dt><dd>${currency(result.startingBet)}</dd>
-          <dt>Starting 1R</dt><dd>${currency(result.startingR)}</dd>
-          <dt>Average winner</dt><dd>${currency(result.startingWinner)}</dd>
-          <dt>Average loser</dt><dd>-${currency(result.startingLoser)}</dd>
+          <dt>Starting portfolio budget</dt><dd>${currency(result.startingPortfolioBudget)}</dd>
+          <dt>Target size / trade</dt><dd>${currency(result.startingBet)}</dd>
+          <dt>Starting 1R / trade</dt><dd>${currency(result.startingR)}</dd>
+          <dt>Expected overlapping trades</dt><dd>${result.expectedConcurrentTrades.toFixed(1)}</dd>
         </dl>
       </article>`).join('');
 
     const constrained = results.filter((result) => result.constrained);
     if (constrained.length) {
-      $('allocationNote').innerHTML = `<strong>Available-equity limit applied:</strong> ${constrained.map((x) => x.label).join(', ')} mathematically calls for more than 100% of equity. Because this app has no leverage mode, the suggested allocation is shown as 100%.`;
+      const maxPct = latestSimulation?.params?.allowMargin ? '150%' : '100%';
+      $('allocationNote').innerHTML = `<strong>Exposure ceiling applied:</strong> ${constrained.map((x) => x.label).join(', ')} mathematically calls for more than ${maxPct} of equity. The portfolio Kelly budget is capped at ${maxPct}.`;
       $('allocationNote').classList.remove('hidden');
     } else {
       $('allocationNote').classList.add('hidden');
@@ -960,6 +823,7 @@ td strong { color: var(--text); }
       <tr>
         <td><strong>${result.label}</strong></td>
         <td>${percent(result.allocationFraction, 1)}</td>
+        <td>${currency(result.startingBet)}</td>
         <td>${currency(result.startingR)}</td>
         <td>${formatTradeCount(result.targetTrades.median)}</td>
         <td>${formatDurationDays(result.targetDays.median)}</td>
@@ -967,16 +831,22 @@ td strong { color: var(--text); }
         <td>${percent(result.ruinProbability, 2)}</td>
         <td>${percent(result.maxDrawdown.median, 1)}</td>
       </tr>`).join('');
+    $('utilizationBody').innerHTML = results.map((result) => `
+      <tr>
+        <td><strong>${result.label}</strong></td>
+        <td>${percent(result.deployedFraction.median, 1)}</td>
+        <td>${percent(result.averagePositionSizeFraction.median, 1)}</td>
+        <td>${Number.isFinite(result.averageOpenPositions.median) ? result.averageOpenPositions.median.toFixed(1) : '—'}</td>
+        <td>${percent(result.fundedRate.median, 1)}</td>
+        <td>${percent(result.skippedRate.median, 1)}</td>
+      </tr>`).join('');
   }
 
   function renderGoalSummary(results, params) {
     const full = results.find((result) => result.key === 'full');
-    const constrainedText = full.constrained ? 'The no-leverage rule limits Full Kelly to the available account balance. ' : '';
-    const fundingText = Number.isFinite(full.fundedRate.median)
-      ? ` On a median path, about ${percent(full.fundedRate.median, 1)} of arriving trade opportunities were funded because capital can remain tied up in open positions.`
-      : '';
-    $('goalSummary').textContent = `${constrainedText}At ${percent(full.allocationFraction, 1)} allocation, a fully funded average winner changes the account by +${percent(full.winAccountImpact, 1)} and a fully funded average loser changes it by -${percent(full.lossAccountImpact, 1)}. The simulation now runs on calendar days, with positions staying open until their simulated exit.${fundingText}`;
-    $('cadenceNote').innerHTML = `<strong>Inputs actually simulated:</strong> ${params.tradesPerWeek.toLocaleString('en-US', { maximumFractionDigits: 2 })} opportunities/week · ${params.holdingPeriodDays.toLocaleString('en-US', { maximumFractionDigits: 2 })}-day average hold · ${params.horizonYears.toLocaleString('en-US')} year horizon · ${params.simulations.toLocaleString('en-US')} paths.<br><strong>Capital-aware cadence:</strong> Trade opportunities arrive randomly around that weekly average. Individual holding periods vary around the entered average. Open positions reserve their capital until exit, so longer holding periods reduce how many later opportunities can be funded.`;
+    const modeText = params.allowMargin ? 'Margin is enabled with a 150% total-exposure ceiling.' : 'Margin is off, so total exposure is capped at 100% of equity.';
+    $('goalSummary').textContent = `${modeText} ${full.label} uses a ${percent(full.allocationFraction, 1)} total portfolio budget, divided into a target starting trade size of ${currency(full.startingBet)} based on roughly ${full.expectedConcurrentTrades.toFixed(1)} expected overlapping trades. The simulator never lets the total open-position budget drift above the selected Kelly level.`;
+    $('cadenceNote').innerHTML = `<strong>Inputs actually simulated:</strong> ${params.tradesPerWeek.toLocaleString('en-US', { maximumFractionDigits: 2 })} opportunities/week · ${params.holdingPeriodDays.toLocaleString('en-US', { maximumFractionDigits: 2 })}-day average hold · ${params.horizonYears.toLocaleString('en-US')} year horizon · ${params.simulations.toLocaleString('en-US')} paths · ${params.allowMargin ? 'margin up to 150%' : 'no margin'}.<br><strong>Portfolio-level sizing:</strong> Kelly sets the maximum total budget across all open positions. Target position size equals that budget divided by the expected overlap from trade frequency and holding period. Arrivals and actual holding periods still vary randomly.`;
     $('cadenceNote').classList.remove('hidden');
   }
 
@@ -1091,29 +961,17 @@ td strong { color: var(--text); }
 
   $('downloadCsv').addEventListener('click', () => {
     if (!latestSimulation) return;
-    const rows = [['Kelly level', 'Allocation', 'Starting bet', 'Starting 1R', 'Median closed trades', 'Median calendar days', 'Median calendar years', 'Average holding period days', 'Median opportunity funding rate', 'Target probability', 'Risk of ruin', 'Median max drawdown']];
+    const rows = [['Kelly level', 'Portfolio budget', 'Target size per trade', 'Starting 1R per trade', 'Median closed trades', 'Median calendar days', 'Median calendar years', 'Average holding period days', 'Median capital deployed', 'Median position size', 'Median open positions', 'Median funded opportunity rate', 'Median skipped opportunity rate', 'Target probability', 'Risk of ruin', 'Median max drawdown', 'Margin enabled']];
     latestSimulation.results.forEach((result) => rows.push([
-      result.label,
-      result.allocationFraction,
-      result.startingBet,
-      result.startingR,
-      result.targetTrades.median ?? '',
-      result.targetDays.median ?? '',
-      result.targetDays.median ? result.targetDays.median / 365.25 : '',
-      latestSimulation.params.holdingPeriodDays,
-      result.fundedRate.median ?? '',
-      result.targetProbability,
-      result.ruinProbability,
-      result.maxDrawdown.median,
+      result.label, result.allocationFraction, result.startingBet, result.startingR,
+      result.targetTrades.median ?? '', result.targetDays.median ?? '', result.targetDays.median ? result.targetDays.median / 365.25 : '',
+      latestSimulation.params.holdingPeriodDays, result.deployedFraction.median ?? '', result.averagePositionSizeFraction.median ?? '', result.averageOpenPositions.median ?? '',
+      result.fundedRate.median ?? '', result.skippedRate.median ?? '', result.targetProbability, result.ruinProbability, result.maxDrawdown.median, latestSimulation.params.allowMargin,
     ]));
     const csv = rows.map((row) => row.map((cell) => `"${String(cell).replace(/"/g, '""')}"`).join(',')).join('\n');
     const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });
-    const url = URL.createObjectURL(blob);
-    const anchor = document.createElement('a');
-    anchor.href = url;
-    anchor.download = 'kellylab-results.csv';
-    anchor.click();
-    URL.revokeObjectURL(url);
+    const url = URL.createObjectURL(blob); const anchor = document.createElement('a');
+    anchor.href = url; anchor.download = 'kellylab-results.csv'; anchor.click(); URL.revokeObjectURL(url);
   });
 
   function readSizeInputs() {
@@ -1125,6 +983,7 @@ td strong { color: var(--text); }
       entryPrice: parseMoney($('entryPrice').value),
       multiplier: Number($('unitMultiplier').value),
       roundingIncrement: Number($('roundingIncrement').value),
+      allowMargin: $('allowMarginSize').checked,
     };
   }
 
@@ -1150,7 +1009,7 @@ td strong { color: var(--text); }
     const rows = core.calculatePositionRows(params);
     $('sizeResultsBody').innerHTML = rows.map((row) => `
       <tr>
-        <td><strong>${row.label}</strong>${row.constrained ? '<br><small>limited to equity</small>' : ''}</td>
+        <td><strong>${row.label}</strong>${row.constrained ? `<br><small>limited to ${params.allowMargin ? '150% margin ceiling' : 'account equity'}</small>` : ''}</td>
         <td>${percent(row.allocationFraction, 1)}</td>
         <td>${currency(row.suggestedBet)}</td>
         <td>${row.units.toLocaleString('en-US')}</td>
@@ -1159,12 +1018,19 @@ td strong { color: var(--text); }
         <td>${currency(row.averageWinner)}</td>
       </tr>`).join('');
     const full = rows.find((row) => row.key === 'full');
-    $('sizeExplanation').textContent = `${full.label} suggests placing ${currency(full.suggestedBet)} into the trade. Based on a ${params.avgLossPct}% average losing trade, 1R is ${currency(full.oneR)} after unit rounding; an average ${params.avgWinPct}% winner is ${currency(full.averageWinner)}.`;
+    $('sizeExplanation').textContent = `${full.label} suggests placing ${currency(full.suggestedBet)} into a single isolated trade under the selected ${params.allowMargin ? '150% margin' : 'no-margin'} ceiling. Based on a ${params.avgLossPct}% average losing trade, 1R is ${currency(full.oneR)} after unit rounding; an average ${params.avgWinPct}% winner is ${currency(full.averageWinner)}.`;
   });
 
   function resetGroup(group) {
-    Object.entries(defaults[group]).forEach(([id, value]) => { $(id).value = value; });
+    Object.entries(defaults[group]).forEach(([id, value]) => {
+      const el = $(id);
+      if (!el) return;
+      if (el.type === 'checkbox') el.checked = Boolean(value);
+      else el.value = value;
+    });
     document.querySelectorAll(`#${group === 'goal' ? 'goalForm' : 'sizeForm'} .money-input`).forEach(normalizeMoneyInput);
+    if (group === 'goal') syncMargin('allowMarginGoal');
+    else syncMargin('allowMarginSize');
     updateHero();
   }
 
@@ -1173,8 +1039,9 @@ td strong { color: var(--text); }
     latestSimulation = null;
     $('goalKellyCards').className = 'kelly-card-grid placeholder-grid';
     $('goalKellyCards').innerHTML = '<p>Run the simulator to calculate full, half, and quarter Kelly.</p>';
-    $('goalResultsBody').innerHTML = '<tr><td colspan="8" class="empty-cell">Run the simulator to see results.</td></tr>';
-    $('goalSummary').textContent = 'The result will explain exactly how much each average win and loss changes the account.';
+    $('goalResultsBody').innerHTML = '<tr><td colspan="9" class="empty-cell">Run the simulator to see results.</td></tr>';
+    $('utilizationBody').innerHTML = '<tr><td colspan="6" class="empty-cell">Run the simulator to see portfolio utilization.</td></tr>';
+    $('goalSummary').textContent = 'The result will explain the Kelly portfolio budget, target trade size, and how capital is used while trades overlap.';
     $('cadenceNote').classList.add('hidden');
     $('cadenceNote').innerHTML = '';
     $('allocationNote').classList.add('hidden');
