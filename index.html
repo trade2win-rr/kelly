@@ -69,6 +69,11 @@
               </label>
               <label>Average trades per week
                 <input id="tradesPerWeek" type="number" inputmode="decimal" step="any" value="10" />
+                <small>Used to convert trades-to-target into calendar time.</small>
+              </label>
+              <label>Average holding period
+                <div class="suffix-wrap"><input id="holdingPeriodDays" type="number" inputmode="decimal" step="any" value="1" /><span>days</span></div>
+                <small>Typical number of days a trade remains open.</small>
               </label>
               <label>Simulation horizon
                 <select id="horizonYears">
@@ -129,6 +134,7 @@
                 </table>
               </div>
               <p id="goalSummary" class="summary-text">The result will explain exactly how much each average win and loss changes the account.</p>
+              <div id="cadenceNote" class="info-box hidden"></div>
             </section>
 
             <section class="card chart-card">

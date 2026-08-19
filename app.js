@@ -8,7 +8,7 @@
   const defaults = {
     goal: {
       startCapital: '100,000', targetCapital: '5,000,000', ruinCapital: '10,000',
-      goalWinRate: '60', goalAvgWin: '10', goalAvgLoss: '5', tradesPerWeek: '10',
+      goalWinRate: '60', goalAvgWin: '10', goalAvgLoss: '5', tradesPerWeek: '10', holdingPeriodDays: '1',
       horizonYears: '5', simulationCount: '1000',
     },
     size: {
@@ -127,6 +127,7 @@
       avgWinPct: Number($('goalAvgWin').value),
       avgLossPct: Number($('goalAvgLoss').value),
       tradesPerWeek: Number($('tradesPerWeek').value),
+      holdingPeriodDays: Number($('holdingPeriodDays').value),
       horizonYears: Number($('horizonYears').value),
       simulations: Number($('simulationCount').value),
     };
@@ -139,6 +140,7 @@
     const statsError = validateStats(params.winRatePct, params.avgWinPct, params.avgLossPct);
     if (statsError) return statsError;
     if (!(params.tradesPerWeek > 0)) return 'Average trades per week must be greater than 0.';
+    if (!(params.holdingPeriodDays > 0)) return 'Average holding period must be greater than 0 days.';
     return '';
   }
 
@@ -183,6 +185,8 @@
     const full = results.find((result) => result.key === 'full');
     const constrainedText = full.constrained ? 'The no-leverage rule limits Full Kelly to the available account balance. ' : '';
     $('goalSummary').textContent = `${constrainedText}At ${percent(full.allocationFraction, 1)} allocation, an average winning trade changes the account by +${percent(full.winAccountImpact, 1)} and an average losing trade changes it by -${percent(full.lossAccountImpact, 1)}. The median result is based on ${params.simulations.toLocaleString('en-US')} independent-trade simulations, not on every trade being a winner.`;
+    $('cadenceNote').innerHTML = `<strong>Trading cadence:</strong> ${params.tradesPerWeek.toLocaleString('en-US')} trades per week with an average holding period of ${params.holdingPeriodDays.toLocaleString('en-US', { maximumFractionDigits: 2 })} days. Calendar time to target is calculated from trades per week; holding period is shown as context for how long capital is typically tied up.`;
+    $('cadenceNote').classList.remove('hidden');
   }
 
   $('goalForm').addEventListener('submit', (event) => {
@@ -294,7 +298,7 @@
 
   $('downloadCsv').addEventListener('click', () => {
     if (!latestSimulation) return;
-    const rows = [['Kelly level', 'Allocation', 'Starting bet', 'Starting 1R', 'Median trades', 'Median weeks', 'Target probability', 'Risk of ruin', 'Median max drawdown']];
+    const rows = [['Kelly level', 'Allocation', 'Starting bet', 'Starting 1R', 'Median trades', 'Median weeks', 'Average holding period days', 'Target probability', 'Risk of ruin', 'Median max drawdown']];
     latestSimulation.results.forEach((result) => rows.push([
       result.label,
       result.allocationFraction,
@@ -302,6 +306,7 @@
       result.startingR,
       result.targetTrades.median ?? '',
       result.targetTrades.median ? result.targetTrades.median / latestSimulation.params.tradesPerWeek : '',
+      latestSimulation.params.holdingPeriodDays,
       result.targetProbability,
       result.ruinProbability,
       result.maxDrawdown.median,
@@ -375,6 +380,8 @@
     $('goalKellyCards').innerHTML = '<p>Run the simulator to calculate full, half, and quarter Kelly.</p>';
     $('goalResultsBody').innerHTML = '<tr><td colspan="8" class="empty-cell">Run the simulator to see results.</td></tr>';
     $('goalSummary').textContent = 'The result will explain exactly how much each average win and loss changes the account.';
+    $('cadenceNote').classList.add('hidden');
+    $('cadenceNote').innerHTML = '';
     $('allocationNote').classList.add('hidden');
     $('chartScenario').disabled = true;
     $('downloadCsv').disabled = true;

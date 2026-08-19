@@ -1,4 +1,4 @@
-# KellyLab V4
+# KellyLab V5
 
 A static GitHub Pages app that calculates Kelly allocation using actual trading returns.
 
@@ -48,6 +48,8 @@ The goal simulator automatically models full, half, and quarter Kelly and report
 - Probability of reaching the target within the selected horizon
 - Risk of touching the chosen ruin threshold first
 - Median maximum drawdown
+- Average trades per week for calendar-time conversion
+- Average holding period in days for trade-duration context
 - Sample account paths
 
 The simulation assumes independent trades and two possible outcomes: the entered average winner or the entered average loser. Correlation is not modeled.
@@ -65,3 +67,8 @@ README.md
 ```
 
 Then go to **Settings → Pages**, choose **Deploy from a branch**, select `main` and `/(root)`, and save.
+
+
+## Trading cadence
+
+The goal simulator asks for both **average trades per week** and **average holding period in days**. Trades per week is used to convert median trades-to-target into weeks/months/years. Average holding period is reported alongside the result to show how long capital is typically tied up. V5 does not yet model overlapping positions or correlation from the holding-period input.
