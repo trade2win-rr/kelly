@@ -1,3 +1,30 @@
+# KellyLab V6.1 — cache-busted capital-aware build
+
+This build uses versioned asset filenames so GitHub Pages/browser caches cannot silently keep running the older V5 simulation engine.
+
+## Upload to GitHub Pages
+Upload these files to the repository root:
+
+- `index.html`
+- `styles-v61.css`
+- `kelly-core-v61.js`
+- `app-v61.js`
+- `README.md`
+
+The older `app.js`, `kelly-core.js`, and `styles.css` can be deleted after V6.1 is working; V6.1 does not reference them.
+
+You should visibly see **V6.1** next to the KellyLab title after deployment. If you do not see V6.1, the new `index.html` is not live yet.
+
+## Capital-aware timing
+V6.1 simulates calendar days directly. Trade opportunities arrive randomly around the average entered per week. Each funded trade keeps its capital committed until its simulated exit date, so average holding period directly affects the median calendar time.
+
+For the diagnostic example `$100,000 → $5,000,000`, 50% win rate, +9% average winner, -4% average loser, 3 opportunities/week, 18-day average hold, half Kelly, no leverage:
+
+- 5-year horizon: median should display **Not reached** because fewer than half the paths hit $5M within five years.
+- 10–20 year horizon: median is around **9.2 years** (Monte Carlo variation is expected).
+
+A result near **13.1 months** indicates the old V5 timing logic is still being executed (`~170 trades ÷ 3 trades/week`).
+
 # KellyLab V6
 
 A static GitHub Pages app that calculates Kelly allocation using actual trading returns and simulates capital-aware trade overlap.
