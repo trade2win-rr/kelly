@@ -41,7 +41,7 @@
     const rawFullFraction = (p * gain - q * loss) / (gain * loss);
     const rawFraction = Math.max(0, rawFullFraction * factor);
 
-    // This app intentionally has no leverage mode. Allocation cannot exceed equity.
+    // No leverage in this version: one trade cannot use more than 100% of equity.
     const allocationFraction = clamp(rawFraction, 0, 1);
     const constrained = rawFraction > 1;
     const expectancyPosition = p * gain - q * loss;
@@ -110,6 +110,59 @@
     };
   }
 
+
+  function summarizeCensoredTarget(values, totalPaths) {
+    if (!values.length || !(totalPaths > 0)) return { p25: null, median: null, p75: null };
+    const sorted = [...values].sort((a, b) => a - b);
+    const at = (q) => {
+      const requiredRank = Math.ceil(q * totalPaths);
+      if (sorted.length < requiredRank) return null;
+      return sorted[Math.max(0, requiredRank - 1)];
+    };
+    return { p25: at(0.25), median: at(0.5), p75: at(0.75) };
+  }
+
+  function standardNormal(random) {
+    let u1 = random();
+    let u2 = random();
+    if (u1 <= Number.EPSILON) u1 = Number.EPSILON;
+    return Math.sqrt(-2 * Math.log(u1)) * Math.cos(2 * Math.PI * u2);
+  }
+
+  function poisson(lambda, random) {
+    if (!(lambda > 0)) return 0;
+    if (lambda >= 30) {
+      return Math.max(0, Math.round(lambda + Math.sqrt(lambda) * standardNormal(random)));
+    }
+    const limit = Math.exp(-lambda);
+    let product = 1;
+    let k = 0;
+    do {
+      k += 1;
+      product *= random();
+    } while (product > limit);
+    return k - 1;
+  }
+
+  // Gamma(shape=4) distribution with mean = averageDays and CV = 50%.
+  // This keeps holding periods positive while allowing realistic variation around the average.
+  function sampleHoldingDays(averageDays, random) {
+    const theta = averageDays / 4;
+    let sum = 0;
+    for (let i = 0; i < 4; i += 1) {
+      let u = random();
+      if (u <= Number.EPSILON) u = Number.EPSILON;
+      sum += -Math.log(u) * theta;
+    }
+    return Math.max(1, Math.round(sum));
+  }
+
+  function portfolioEquity(cash, openPositions) {
+    let equity = cash;
+    for (let i = 0; i < openPositions.length; i += 1) equity += openPositions[i].bet;
+    return equity;
+  }
+
   function simulateScenario(params, scenario, seedText) {
     const {
       startCapital,
@@ -119,6 +172,7 @@
       avgWinPct,
       avgLossPct,
       tradesPerWeek,
+      holdingPeriodDays,
       horizonYears,
       simulations,
     } = params;
@@ -127,67 +181,116 @@
     const gain = parsePercent(avgWinPct);
     const loss = parsePercent(avgLossPct);
     const allocation = scenario.allocationFraction;
-    const maxTrades = Math.max(1, Math.floor(tradesPerWeek * 52 * horizonYears));
+    const maxDays = Math.max(1, Math.floor(horizonYears * 365.25));
+    const dailyArrivalRate = tradesPerWeek / 7;
     const random = mulberry32(hashString(`${seedText}|${scenario.key}`));
 
-    const targetTrades = [];
+    const targetDays = [];
+    const targetClosedTrades = [];
     const maxDrawdowns = [];
     const endings = [];
+    const fundedRates = [];
     const samplePaths = [];
     let targetCount = 0;
     let ruinCount = 0;
     let unresolvedCount = 0;
     let drawdown50Count = 0;
     let drawdown75Count = 0;
+    let totalOpportunities = 0;
+    let totalFunded = 0;
+    let totalSkipped = 0;
 
-    const sampleEvery = Math.max(1, Math.ceil(maxTrades / 160));
+    const sampleEveryDays = Math.max(1, Math.ceil(maxDays / 180));
     const desiredSamples = 24;
 
     for (let sim = 0; sim < simulations; sim += 1) {
+      let cash = startCapital;
+      let openPositions = [];
       let equity = startCapital;
       let peak = startCapital;
       let maxDrawdown = 0;
       let outcome = 'unresolved';
-      let endingTrade = maxTrades;
+      let endingDay = maxDays;
+      let opportunities = 0;
+      let funded = 0;
+      let skipped = 0;
+      let closedTrades = 0;
       const capture = sim < desiredSamples;
-      const points = capture ? [{ trade: 0, equity }] : null;
+      const points = capture ? [{ day: 0, equity }] : null;
 
       if (allocation <= 0) {
         unresolvedCount += 1;
         maxDrawdowns.push(0);
         endings.push(equity);
+        fundedRates.push(0);
         if (capture) samplePaths.push(points);
         continue;
       }
 
-      for (let trade = 1; trade <= maxTrades; trade += 1) {
-        const won = random() < p;
-        const accountReturn = allocation * (won ? gain : -loss);
-        equity *= 1 + accountReturn;
+      for (let day = 1; day <= maxDays; day += 1) {
+        // Positions close before new opportunities arrive for the day, freeing their capital.
+        if (openPositions.length) {
+          const remaining = [];
+          for (let i = 0; i < openPositions.length; i += 1) {
+            const position = openPositions[i];
+            if (position.exitDay <= day) {
+              const pnl = position.bet * (position.won ? gain : -loss);
+              cash += position.bet + pnl;
+              closedTrades += 1;
+            } else {
+              remaining.push(position);
+            }
+          }
+          openPositions = remaining;
+        }
 
+        equity = portfolioEquity(cash, openPositions);
         if (!Number.isFinite(equity) || equity < 0) equity = 0;
         if (equity > peak) peak = equity;
         const drawdown = peak > 0 ? 1 - equity / peak : 1;
         if (drawdown > maxDrawdown) maxDrawdown = drawdown;
 
-        if (capture && (trade % sampleEvery === 0 || equity >= targetCapital || equity <= ruinCapital)) {
-          points.push({ trade, equity });
-        }
-
         if (equity >= targetCapital) {
           outcome = 'target';
-          endingTrade = trade;
+          endingDay = day;
           targetCount += 1;
-          targetTrades.push(trade);
+          targetDays.push(day);
+          targetClosedTrades.push(closedTrades);
+          if (capture) points.push({ day, equity });
+          break;
+        }
+        if (equity <= ruinCapital) {
+          outcome = 'ruin';
+          endingDay = day;
+          ruinCount += 1;
+          if (capture) points.push({ day, equity });
           break;
         }
 
-        if (equity <= ruinCapital) {
-          outcome = 'ruin';
-          endingTrade = trade;
-          ruinCount += 1;
-          break;
+        const arrivals = poisson(dailyArrivalRate, random);
+        for (let a = 0; a < arrivals; a += 1) {
+          opportunities += 1;
+          equity = portfolioEquity(cash, openPositions);
+          const desiredBet = equity * allocation;
+          const actualBet = Math.min(desiredBet, cash);
+
+          if (!(actualBet > 0)) {
+            skipped += 1;
+            continue;
+          }
+
+          cash -= actualBet;
+          const holdDays = sampleHoldingDays(holdingPeriodDays, random);
+          openPositions.push({
+            bet: actualBet,
+            won: random() < p,
+            exitDay: day + holdDays,
+          });
+          funded += 1;
         }
+
+        equity = portfolioEquity(cash, openPositions);
+        if (capture && (day % sampleEveryDays === 0 || day === maxDays)) points.push({ day, equity });
       }
 
       if (outcome === 'unresolved') unresolvedCount += 1;
@@ -195,25 +298,33 @@
       if (maxDrawdown >= 0.75) drawdown75Count += 1;
       maxDrawdowns.push(maxDrawdown);
       endings.push(equity);
+      fundedRates.push(opportunities > 0 ? funded / opportunities : 0);
+      totalOpportunities += opportunities;
+      totalFunded += funded;
+      totalSkipped += skipped;
 
       if (capture) {
         const last = points[points.length - 1];
-        if (!last || last.trade !== endingTrade) points.push({ trade: endingTrade, equity });
+        if (!last || last.day !== endingDay) points.push({ day: endingDay, equity });
         samplePaths.push(points);
       }
     }
 
-    const targetStats = summarize(targetTrades);
+    // Target-time quantiles are unconditional across all simulation paths. If fewer
+    // than 50% of paths hit the target within the horizon, the median is "not reached".
+    const targetDayStats = summarizeCensoredTarget(targetDays, simulations);
+    const targetTradeStats = summarizeCensoredTarget(targetClosedTrades, simulations);
     const drawdownStats = summarize(maxDrawdowns);
     const endingStats = summarize(endings);
-    const oneYearTrades = tradesPerWeek * 52;
-    const targetWithinOneYear = targetTrades.filter((trade) => trade <= oneYearTrades).length;
+    const fundedRateStats = summarize(fundedRates);
+    const targetWithinOneYear = targetDays.filter((day) => day <= 365.25).length;
 
     return {
       key: scenario.key,
       label: scenario.label,
       factor: scenario.factor,
       allocationFraction: scenario.allocationFraction,
+      rawAllocationFraction: scenario.rawFraction,
       constrained: scenario.constrained,
       startingBet: startCapital * scenario.allocationFraction,
       startingR: startCapital * scenario.allocationFraction * loss,
@@ -223,7 +334,7 @@
       lossAccountImpact: scenario.allocationFraction * loss,
       expectedLogGrowth: scenario.expectedLogGrowth,
       simulations,
-      maxTrades,
+      maxDays,
       targetCount,
       ruinCount,
       unresolvedCount,
@@ -233,9 +344,15 @@
       drawdown50Probability: drawdown50Count / simulations,
       drawdown75Probability: drawdown75Count / simulations,
       oneYearProbability: targetWithinOneYear / simulations,
-      targetTrades: targetStats,
+      targetDays: targetDayStats,
+      targetTrades: targetTradeStats,
       maxDrawdown: drawdownStats,
       endingCapital: endingStats,
+      fundedRate: fundedRateStats,
+      overallFundedRate: totalOpportunities > 0 ? totalFunded / totalOpportunities : 0,
+      totalOpportunities,
+      totalFunded,
+      totalSkipped,
       samplePaths,
     };
   }
@@ -288,5 +405,6 @@
     createScenarioSet,
     runSimulation,
     calculatePositionRows,
+    sampleHoldingDays,
   };
 });

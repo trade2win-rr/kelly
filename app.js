@@ -38,14 +38,14 @@
     return Number.isFinite(value) ? `${(value * 100).toFixed(decimals)}%` : '—';
   }
 
-  function formatDuration(trades, tradesPerWeek) {
-    if (!Number.isFinite(trades)) return 'Not reached';
-    const weeks = trades / tradesPerWeek;
-    if (weeks < 2) return `${weeks.toFixed(1)} weeks`;
+  function formatDurationDays(days) {
+    if (!Number.isFinite(days)) return 'Not reached';
+    const weeks = days / 7;
+    if (days < 14) return `${days.toFixed(0)} days`;
     if (weeks < 13) return `${weeks.toFixed(1)} weeks`;
-    const months = weeks / 4.345;
+    const months = days / 30.4375;
     if (months < 24) return `${months.toFixed(1)} months`;
-    return `${(weeks / 52).toFixed(1)} years`;
+    return `${(days / 365.25).toFixed(1)} years`;
   }
 
   function formatTradeCount(value) {
@@ -167,14 +167,14 @@
     }
   }
 
-  function renderGoalTable(results, tradesPerWeek) {
+  function renderGoalTable(results) {
     $('goalResultsBody').innerHTML = results.map((result) => `
       <tr>
         <td><strong>${result.label}</strong></td>
         <td>${percent(result.allocationFraction, 1)}</td>
         <td>${currency(result.startingR)}</td>
         <td>${formatTradeCount(result.targetTrades.median)}</td>
-        <td>${formatDuration(result.targetTrades.median, tradesPerWeek)}</td>
+        <td>${formatDurationDays(result.targetDays.median)}</td>
         <td>${percent(result.targetProbability, 1)}</td>
         <td>${percent(result.ruinProbability, 2)}</td>
         <td>${percent(result.maxDrawdown.median, 1)}</td>
@@ -184,8 +184,11 @@
   function renderGoalSummary(results, params) {
     const full = results.find((result) => result.key === 'full');
     const constrainedText = full.constrained ? 'The no-leverage rule limits Full Kelly to the available account balance. ' : '';
-    $('goalSummary').textContent = `${constrainedText}At ${percent(full.allocationFraction, 1)} allocation, an average winning trade changes the account by +${percent(full.winAccountImpact, 1)} and an average losing trade changes it by -${percent(full.lossAccountImpact, 1)}. The median result is based on ${params.simulations.toLocaleString('en-US')} independent-trade simulations, not on every trade being a winner.`;
-    $('cadenceNote').innerHTML = `<strong>Trading cadence:</strong> ${params.tradesPerWeek.toLocaleString('en-US')} trades per week with an average holding period of ${params.holdingPeriodDays.toLocaleString('en-US', { maximumFractionDigits: 2 })} days. Calendar time to target is calculated from trades per week; holding period is shown as context for how long capital is typically tied up.`;
+    const fundingText = Number.isFinite(full.fundedRate.median)
+      ? ` On a median path, about ${percent(full.fundedRate.median, 1)} of arriving trade opportunities were funded because capital can remain tied up in open positions.`
+      : '';
+    $('goalSummary').textContent = `${constrainedText}At ${percent(full.allocationFraction, 1)} allocation, a fully funded average winner changes the account by +${percent(full.winAccountImpact, 1)} and a fully funded average loser changes it by -${percent(full.lossAccountImpact, 1)}. The simulation now runs on calendar days, with positions staying open until their simulated exit.${fundingText}`;
+    $('cadenceNote').innerHTML = `<strong>Capital-aware cadence:</strong> Trade opportunities arrive randomly at an average rate of ${params.tradesPerWeek.toLocaleString('en-US')} per week. Individual holding periods vary around ${params.holdingPeriodDays.toLocaleString('en-US', { maximumFractionDigits: 2 })} days. Open positions reserve their capital until exit, so longer holding periods can increase time to target by reducing how many later opportunities can be funded.`;
     $('cadenceNote').classList.remove('hidden');
   }
 
@@ -205,7 +208,7 @@
       try {
         latestSimulation = { params, results: core.runSimulation(params) };
         renderKellyCards(latestSimulation.results);
-        renderGoalTable(latestSimulation.results, params.tradesPerWeek);
+        renderGoalTable(latestSimulation.results);
         renderGoalSummary(latestSimulation.results, params);
         $('chartScenario').disabled = false;
         $('downloadCsv').disabled = false;
@@ -249,12 +252,12 @@
     const pad = { left: 70, right: 24, top: 24, bottom: 42 };
     const plotW = width - pad.left - pad.right;
     const plotH = height - pad.top - pad.bottom;
-    const maxTrade = result.maxTrades;
+    const maxDay = result.maxDays;
     const minValue = Math.max(1, Math.min(params.ruinCapital || 1, params.startCapital));
     const maxValue = Math.max(params.targetCapital, ...result.samplePaths.flatMap((path) => path.map((point) => point.equity)));
     const minLog = Math.log(minValue);
     const maxLog = Math.log(maxValue);
-    const x = (trade) => pad.left + (trade / maxTrade) * plotW;
+    const x = (day) => pad.left + (day / maxDay) * plotW;
     const y = (value) => pad.top + (1 - (Math.log(Math.max(value, 1)) - minLog) / Math.max(1e-9, maxLog - minLog)) * plotH;
 
     ctx.strokeStyle = border;
@@ -263,10 +266,12 @@
     ctx.font = '12px system-ui';
     for (let i = 0; i <= 5; i += 1) {
       const fraction = i / 5;
-      const trade = Math.round(maxTrade * fraction);
-      const xp = x(trade);
+      const day = Math.round(maxDay * fraction);
+      const xp = x(day);
       ctx.beginPath(); ctx.moveTo(xp, pad.top); ctx.lineTo(xp, pad.top + plotH); ctx.stroke();
-      ctx.fillText(`${(trade / params.tradesPerWeek).toFixed(0)}w`, xp - 10, height - 16);
+      const weeks = day / 7;
+      const label = weeks < 104 ? `${weeks.toFixed(0)}w` : `${(day / 365.25).toFixed(1)}y`;
+      ctx.fillText(label, xp - 10, height - 16);
     }
 
     const guide = (value, color, label) => {
@@ -286,8 +291,8 @@
       ctx.lineWidth = index === 0 ? 2.5 : 1;
       ctx.beginPath();
       path.forEach((point, pointIndex) => {
-        if (pointIndex === 0) ctx.moveTo(x(point.trade), y(point.equity));
-        else ctx.lineTo(x(point.trade), y(point.equity));
+        if (pointIndex === 0) ctx.moveTo(x(point.day), y(point.equity));
+        else ctx.lineTo(x(point.day), y(point.equity));
       });
       ctx.stroke();
     });
@@ -298,15 +303,17 @@
 
   $('downloadCsv').addEventListener('click', () => {
     if (!latestSimulation) return;
-    const rows = [['Kelly level', 'Allocation', 'Starting bet', 'Starting 1R', 'Median trades', 'Median weeks', 'Average holding period days', 'Target probability', 'Risk of ruin', 'Median max drawdown']];
+    const rows = [['Kelly level', 'Allocation', 'Starting bet', 'Starting 1R', 'Median closed trades', 'Median calendar days', 'Median calendar years', 'Average holding period days', 'Median opportunity funding rate', 'Target probability', 'Risk of ruin', 'Median max drawdown']];
     latestSimulation.results.forEach((result) => rows.push([
       result.label,
       result.allocationFraction,
       result.startingBet,
       result.startingR,
       result.targetTrades.median ?? '',
-      result.targetTrades.median ? result.targetTrades.median / latestSimulation.params.tradesPerWeek : '',
+      result.targetDays.median ?? '',
+      result.targetDays.median ? result.targetDays.median / 365.25 : '',
       latestSimulation.params.holdingPeriodDays,
+      result.fundedRate.median ?? '',
       result.targetProbability,
       result.ruinProbability,
       result.maxDrawdown.median,

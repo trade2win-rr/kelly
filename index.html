@@ -67,13 +67,13 @@
                 <div class="suffix-wrap"><input id="goalAvgLoss" type="number" inputmode="decimal" step="any" value="5" /><span>%</span></div>
                 <small>Enter a positive loss magnitude, such as 5.</small>
               </label>
-              <label>Average trades per week
+              <label>Average trade opportunities per week
                 <input id="tradesPerWeek" type="number" inputmode="decimal" step="any" value="10" />
-                <small>Used to convert trades-to-target into calendar time.</small>
+                <small>Opportunities arrive randomly around this long-run weekly average.</small>
               </label>
               <label>Average holding period
                 <div class="suffix-wrap"><input id="holdingPeriodDays" type="number" inputmode="decimal" step="any" value="1" /><span>days</span></div>
-                <small>Typical number of days a trade remains open.</small>
+                <small>Each simulated trade varies around this average and keeps its capital tied up until exit.</small>
               </label>
               <label>Simulation horizon
                 <select id="horizonYears">
@@ -81,6 +81,7 @@
                   <option value="3">3 years</option>
                   <option value="5" selected>5 years</option>
                   <option value="10">10 years</option>
+                  <option value="20">20 years</option>
                 </select>
               </label>
               <label>Number of simulations
@@ -94,7 +95,7 @@
 
             <div id="goalError" class="message hidden" role="alert"></div>
             <button class="primary-button" type="submit">Estimate time to goal</button>
-            <p class="fine-print">No correlation adjustment is included. Each trade is modeled independently as either your average winner or average loser.</p>
+            <p class="fine-print">No correlation adjustment is included. Trade arrivals are random, holding periods vary around your average, and each closed trade is independently modeled as either your average winner or average loser.</p>
           </form>
 
           <div class="results-stack">
@@ -121,8 +122,8 @@
                       <th>Kelly level</th>
                       <th>Allocation</th>
                       <th>Starting 1R</th>
-                      <th>Median trades</th>
-                      <th>Median time</th>
+                      <th>Median closed trades</th>
+                      <th>Median calendar time</th>
                       <th>Target chance</th>
                       <th>Risk of ruin</th>
                       <th>Median max DD</th>
@@ -226,11 +227,11 @@
           <h3>What the app calculates</h3>
           <div class="method-grid">
             <article><h4>Kelly allocation</h4><p>The calculator maximizes expected logarithmic account growth using your win probability and percentage return on winning and losing positions.</p></article>
-            <article><h4>No leverage</h4><p>If the formula suggests placing more than the account balance into a trade, the app uses 100% of equity. It does not display or model borrowed capital.</p></article>
+            <article><h4>No leverage</h4><p>If the formula suggests placing more than the account balance into a trade, the app uses 100% of equity. Capital committed to an open trade is unavailable for new trades until that position closes.</p></article>
             <article><h4>Dollar R</h4><p>1R equals the suggested bet amount multiplied by the average losing-trade percentage. A $100,000 bet with a 5% average loss has a $5,000 R.</p></article>
             <article><h4>Risk of ruin</h4><p>Risk of ruin is the percentage of simulated paths that touch your chosen dollar threshold before reaching the target within the selected horizon.</p></article>
           </div>
-          <div class="warning-box"><strong>Important:</strong> The model assumes your win rate and average win/loss remain stable, trades are independent, and every outcome equals the entered average. Real results include dispersion, slippage, gaps, changing market regimes, and correlation.</div>
+          <div class="warning-box"><strong>Important:</strong> Trade opportunities arrive randomly around your weekly average, holding periods vary around the entered average, and open positions tie up capital until exit. The model still assumes trade outcomes are independent and each closed trade equals the entered average win or loss. Real results include wider outcome dispersion, slippage, gaps, regime changes, and correlation.</div>
         </section>
       </section>
     </main>
