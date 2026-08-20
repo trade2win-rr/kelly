@@ -3,9 +3,9 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <meta name="description" content="A portfolio-level Kelly allocation calculator, trading goal simulator, and risk-of-ruin model with optional margin up to 150% exposure." />
-  <title>KellyLab V7.0</title>
-  <!-- V7.0 is self-contained: portfolio-level Kelly budgets, optional 150% margin, and capital-aware simulation. -->
+  <meta name="description" content="A portfolio-level Kelly allocation calculator and trading goal simulator with optional margin, annual tax withholding, and annual withdrawals." />
+  <title>KellyLab V7.1</title>
+  <!-- V7.1 is self-contained: portfolio-level Kelly budgets, optional 150% margin, annual tax withholding, annual withdrawals, and capital-aware simulation. -->
   <style>
 :root {
   --bg: #f3f5f8;
@@ -154,7 +154,7 @@ td strong { color: var(--text); }
     <header class="topbar">
       <div>
         <p class="eyebrow">TRADING ALLOCATION TOOL</p>
-        <h1>Kelly<span>Lab</span> <small class="build-badge">V7.0</small></h1>
+        <h1>Kelly<span>Lab</span> <small class="build-badge">V7.1</small></h1>
       </div>
       <button id="themeToggle" class="icon-button" type="button" aria-label="Toggle dark mode">◐</button>
     </header>
@@ -233,6 +233,14 @@ td strong { color: var(--text); }
                   <option value="2500">2,500 — more stable</option>
                 </select>
               </label>
+              <label>Annual tax rate <small>(optional)</small>
+                <div class="suffix-wrap"><input id="annualTaxRate" type="number" inputmode="decimal" step="any" min="0" max="100" placeholder="0" /><span>%</span></div>
+                <small>Applied at each completed simulation year to positive realized trading P&amp;L for that year only.</small>
+              </label>
+              <label>Annual withdrawal <small>(optional)</small>
+                <div class="money-wrap"><span>$</span><input id="annualWithdrawal" class="money-input" type="text" inputmode="decimal" data-decimals="0" placeholder="0" /></div>
+                <small>Fixed dollar amount deducted at each completed simulation year after taxes.</small>
+              </label>
             </div>
 
             <label class="checkbox-row">
@@ -242,7 +250,7 @@ td strong { color: var(--text); }
 
             <div id="goalError" class="message hidden" role="alert"></div>
             <button class="primary-button" type="submit">Estimate time to goal</button>
-            <p class="fine-print">No correlation adjustment is included. Trade arrivals are random, holding periods vary around your average, and each closed trade is independently modeled as either your average winner or average loser.</p>
+            <p class="fine-print">No correlation adjustment is included. Trade arrivals are random, holding periods vary around your average, and each closed trade is independently modeled as either your average winner or average loser. Optional annual taxes and withdrawals are applied every 365 simulated days.</p>
           </form>
 
           <div class="results-stack">
@@ -287,6 +295,13 @@ td strong { color: var(--text); }
                 <table>
                   <thead><tr><th>Kelly level</th><th>Avg capital deployed</th><th>Avg position size</th><th>Avg open positions</th><th>Opportunities funded</th><th>Opportunities skipped</th></tr></thead>
                   <tbody id="utilizationBody"><tr><td colspan="6" class="empty-cell">Run the simulator to see portfolio utilization.</td></tr></tbody>
+                </table>
+              </div>
+              <h4 class="subsection-title">Annual cash-flow impact</h4>
+              <div class="table-wrap">
+                <table>
+                  <thead><tr><th>Kelly level</th><th>Median taxes paid</th><th>Median withdrawals</th><th>Median ending capital</th></tr></thead>
+                  <tbody id="cashFlowBody"><tr><td colspan="4" class="empty-cell">Run the simulator to see annual tax and withdrawal impact.</td></tr></tbody>
                 </table>
               </div>
               <p id="goalSummary" class="summary-text">The result will explain the Kelly portfolio budget, target trade size, and how capital is used while trades overlap.</p>
@@ -388,9 +403,10 @@ td strong { color: var(--text); }
             <article><h4>Portfolio Kelly budget</h4><p>Full, half, and quarter Kelly set the maximum total capital budget across all open trades. Half Kelly can never silently drift back toward a Full-Kelly exposure.</p></article>
             <article><h4>Target trade size</h4><p>The portfolio budget is divided by the expected number of overlapping trades, estimated from opportunities per week × average holding days ÷ 7. Actual arrivals and holding periods still vary randomly.</p></article>
             <article><h4>Optional margin</h4><p>Margin off caps total exposure at 100% of equity. Margin on permits up to 150%. If the Kelly formula is below those limits, the Kelly budget remains lower. Margin interest is not included.</p></article>
+            <article><h4>Annual taxes &amp; withdrawals</h4><p>Optional tax withholding is charged every 365 simulated days on positive realized trading P&amp;L from that year. A fixed optional withdrawal is then deducted. Losing years do not generate a tax credit.</p></article>
             <article><h4>Risk of ruin</h4><p>Risk of ruin is the percentage of simulated paths that touch your chosen dollar threshold before reaching the target within the selected horizon.</p></article>
           </div>
-          <div class="warning-box"><strong>Important:</strong> Trade opportunities arrive randomly around your weekly average, holding periods vary around the entered average, and open positions tie up capital until exit. The model still assumes trade outcomes are independent and each closed trade equals the entered average win or loss. If equity falls enough that existing positions exceed the selected Kelly budget, the model proportionally trims open positions back to budget. Real results include wider outcome dispersion, slippage, gaps, margin interest, regime changes, and correlation.</div>
+          <div class="warning-box"><strong>Important:</strong> Trade opportunities arrive randomly around your weekly average, holding periods vary around the entered average, and open positions tie up capital until exit. The model still assumes trade outcomes are independent and each closed trade equals the entered average win or loss. If equity falls enough that existing positions exceed the selected Kelly budget, the model proportionally trims open positions back to budget. Real results include wider outcome dispersion, slippage, gaps, margin interest, tax-law details, regime changes, and correlation.</div>
         </section>
       </section>
     </main>
@@ -481,6 +497,28 @@ td strong { color: var(--text); }
   function grossExposure(openPositions) { return openPositions.reduce((sum, position) => sum + position.bet, 0); }
   function portfolioEquity(cash, openPositions) { return cash + grossExposure(openPositions); }
 
+  // Pays an external cash obligation from idle cash first, then proportionally reduces open positions if needed.
+  function deductFromPortfolio(cash, openPositions, amount) {
+    const requested = Math.max(0, Number(amount) || 0);
+    if (!(requested > 0)) return { cash, openPositions, paid: 0 };
+    let remaining = requested;
+    const fromCash = Math.min(Math.max(0, cash), remaining);
+    cash -= fromCash;
+    remaining -= fromCash;
+    let paid = fromCash;
+    if (remaining > 0) {
+      const gross = grossExposure(openPositions);
+      const fromPositions = Math.min(gross, remaining);
+      if (fromPositions > 0 && gross > 0) {
+        const scale = Math.max(0, (gross - fromPositions) / gross);
+        openPositions.forEach((position) => { position.bet *= scale; });
+        paid += fromPositions;
+        remaining -= fromPositions;
+      }
+    }
+    return { cash: Math.max(0, cash), openPositions, paid };
+  }
+
   // Keeps already-open positions inside the selected Kelly portfolio budget after equity changes.
   function trimToBudget(cash, openPositions, allocationFraction) {
     let equity = portfolioEquity(cash, openPositions);
@@ -497,8 +535,10 @@ td strong { color: var(--text); }
   }
 
   function simulateScenario(params, scenario, seedText) {
-    const { startCapital, targetCapital, ruinCapital, winRatePct, avgWinPct, avgLossPct, tradesPerWeek, holdingPeriodDays, horizonYears, simulations } = params;
+    const { startCapital, targetCapital, ruinCapital, winRatePct, avgWinPct, avgLossPct, tradesPerWeek, holdingPeriodDays, horizonYears, simulations, annualTaxRatePct = 0, annualWithdrawal = 0 } = params;
     const p = parsePercent(winRatePct), gain = parsePercent(avgWinPct), loss = parsePercent(avgLossPct);
+    const annualTaxRate = Math.max(0, Number(annualTaxRatePct) || 0) / 100;
+    const annualWithdrawalAmount = Math.max(0, Number(annualWithdrawal) || 0);
     const allocation = scenario.allocationFraction;
     const expectedConcurrentTrades = Math.max(1, tradesPerWeek * holdingPeriodDays / 7);
     const targetTradeFraction = allocation / expectedConcurrentTrades;
@@ -506,7 +546,7 @@ td strong { color: var(--text); }
     const dailyArrivalRate = tradesPerWeek / 7;
     const random = mulberry32(hashString(`${seedText}|${scenario.key}`));
 
-    const targetDays = [], targetClosedTrades = [], maxDrawdowns = [], endings = [], fundedRates = [], skippedRates = [], deployedFractions = [], positionSizeFractions = [], averageOpenPositions = [];
+    const targetDays = [], targetClosedTrades = [], maxDrawdowns = [], endings = [], fundedRates = [], skippedRates = [], deployedFractions = [], positionSizeFractions = [], averageOpenPositions = [], taxesPaid = [], withdrawalsPaid = [];
     const samplePaths = [];
     let targetCount = 0, ruinCount = 0, unresolvedCount = 0, drawdown50Count = 0, drawdown75Count = 0;
     let totalOpportunities = 0, totalFunded = 0, totalPartial = 0, totalSkipped = 0;
@@ -516,23 +556,32 @@ td strong { color: var(--text); }
       let cash = startCapital, openPositions = [], equity = startCapital, peak = startCapital, maxDrawdown = 0;
       let outcome = 'unresolved', endingDay = maxDays, opportunities = 0, funded = 0, partial = 0, skipped = 0, closedTrades = 0;
       let exposureSum = 0, openCountSum = 0, observedDays = 0, positionFractionSum = 0, positionEntries = 0;
+      let yearlyRealizedPnl = 0, totalTaxPaid = 0, totalWithdrawalPaid = 0;
       const capture = sim < desiredSamples;
       const points = capture ? [{ day: 0, equity }] : null;
-
-      if (allocation <= 0) {
-        unresolvedCount += 1; maxDrawdowns.push(0); endings.push(equity); fundedRates.push(0); skippedRates.push(1); deployedFractions.push(0); positionSizeFractions.push(0); averageOpenPositions.push(0);
-        if (capture) samplePaths.push(points);
-        continue;
-      }
 
       for (let day = 1; day <= maxDays; day += 1) {
         if (openPositions.length) {
           const remaining = [];
           for (const position of openPositions) {
-            if (position.exitDay <= day) { const pnl = position.bet * (position.won ? gain : -loss); cash += position.bet + pnl; closedTrades += 1; }
-            else remaining.push(position);
+            if (position.exitDay <= day) {
+              const pnl = position.bet * (position.won ? gain : -loss);
+              cash += position.bet + pnl;
+              yearlyRealizedPnl += pnl;
+              closedTrades += 1;
+            } else remaining.push(position);
           }
           openPositions = remaining;
+        }
+
+        // Every 365 simulated days, pay tax on positive realized P&L for that year, then take the optional fixed withdrawal.
+        if (day % 365 === 0) {
+          const taxDue = Math.max(0, yearlyRealizedPnl) * annualTaxRate;
+          let payment = deductFromPortfolio(cash, openPositions, taxDue);
+          cash = payment.cash; openPositions = payment.openPositions; totalTaxPaid += payment.paid;
+          payment = deductFromPortfolio(cash, openPositions, annualWithdrawalAmount);
+          cash = payment.cash; openPositions = payment.openPositions; totalWithdrawalPaid += payment.paid;
+          yearlyRealizedPnl = 0;
         }
 
         let trimmed = trimToBudget(cash, openPositions, allocation);
@@ -575,7 +624,7 @@ td strong { color: var(--text); }
       if (outcome === 'unresolved') unresolvedCount += 1;
       if (maxDrawdown >= 0.5) drawdown50Count += 1;
       if (maxDrawdown >= 0.75) drawdown75Count += 1;
-      maxDrawdowns.push(maxDrawdown); endings.push(equity);
+      maxDrawdowns.push(maxDrawdown); endings.push(equity); taxesPaid.push(totalTaxPaid); withdrawalsPaid.push(totalWithdrawalPaid);
       const participated = funded + partial;
       fundedRates.push(opportunities > 0 ? participated / opportunities : 0);
       skippedRates.push(opportunities > 0 ? skipped / opportunities : 0);
@@ -588,7 +637,7 @@ td strong { color: var(--text); }
     }
 
     const targetDayStats = summarizeCensoredTarget(targetDays, simulations), targetTradeStats = summarizeCensoredTarget(targetClosedTrades, simulations);
-    const drawdownStats = summarize(maxDrawdowns), endingStats = summarize(endings), fundedRateStats = summarize(fundedRates), skippedRateStats = summarize(skippedRates), deployedStats = summarize(deployedFractions), positionSizeStats = summarize(positionSizeFractions), openPositionStats = summarize(averageOpenPositions);
+    const drawdownStats = summarize(maxDrawdowns), endingStats = summarize(endings), fundedRateStats = summarize(fundedRates), skippedRateStats = summarize(skippedRates), deployedStats = summarize(deployedFractions), positionSizeStats = summarize(positionSizeFractions), openPositionStats = summarize(averageOpenPositions), taxStats = summarize(taxesPaid), withdrawalStats = summarize(withdrawalsPaid);
     const targetWithinOneYear = targetDays.filter((day) => day <= 365.25).length;
 
     return {
@@ -605,6 +654,7 @@ td strong { color: var(--text); }
       drawdown50Probability: drawdown50Count / simulations, drawdown75Probability: drawdown75Count / simulations, oneYearProbability: targetWithinOneYear / simulations,
       targetDays: targetDayStats, targetTrades: targetTradeStats, maxDrawdown: drawdownStats, endingCapital: endingStats,
       fundedRate: fundedRateStats, skippedRate: skippedRateStats, deployedFraction: deployedStats, averagePositionSizeFraction: positionSizeStats, averageOpenPositions: openPositionStats,
+      taxesPaid: taxStats, withdrawalsPaid: withdrawalStats,
       overallFundedRate: totalOpportunities > 0 ? (totalFunded + totalPartial) / totalOpportunities : 0,
       overallSkippedRate: totalOpportunities > 0 ? totalSkipped / totalOpportunities : 0,
       totalOpportunities, totalFunded, totalPartial, totalSkipped, samplePaths,
@@ -614,7 +664,13 @@ td strong { color: var(--text); }
   function runSimulation(params) {
     const maxExposureFraction = params.allowMargin ? 1.5 : 1;
     const scenarios = createScenarioSet(params.winRatePct, params.avgWinPct, params.avgLossPct, maxExposureFraction);
-    const seedText = JSON.stringify(params);
+    const seedParams = { ...params };
+    // Preserve V7 random paths exactly when the new optional annual cash-flow fields are unused.
+    if (!(seedParams.annualTaxRatePct > 0) && !(seedParams.annualWithdrawal > 0)) {
+      delete seedParams.annualTaxRatePct;
+      delete seedParams.annualWithdrawal;
+    }
+    const seedText = JSON.stringify(seedParams);
     return scenarios.map((scenario) => simulateScenario(params, scenario, seedText));
   }
 
@@ -647,7 +703,7 @@ td strong { color: var(--text); }
     goal: {
       startCapital: '100,000', targetCapital: '5,000,000', ruinCapital: '10,000',
       goalWinRate: '60', goalAvgWin: '10', goalAvgLoss: '5', tradesPerWeek: '10', holdingPeriodDays: '1',
-      horizonYears: '5', simulationCount: '1000', allowMarginGoal: false,
+      horizonYears: '5', simulationCount: '1000', annualTaxRate: '', annualWithdrawal: '', allowMarginGoal: false,
     },
     size: {
       accountEquity: '100,000', sizeWinRate: '60', sizeAvgWin: '10', sizeAvgLoss: '5',
@@ -779,6 +835,8 @@ td strong { color: var(--text); }
       holdingPeriodDays: Number($('holdingPeriodDays').value),
       horizonYears: Number($('horizonYears').value),
       simulations: Number($('simulationCount').value),
+      annualTaxRatePct: $('annualTaxRate').value.trim() === '' ? 0 : Number($('annualTaxRate').value),
+      annualWithdrawal: $('annualWithdrawal').value.trim() === '' ? 0 : parseMoney($('annualWithdrawal').value),
       allowMargin: $('allowMarginGoal').checked,
     };
   }
@@ -791,6 +849,8 @@ td strong { color: var(--text); }
     if (statsError) return statsError;
     if (!(params.tradesPerWeek > 0)) return 'Average trades per week must be greater than 0.';
     if (!(params.holdingPeriodDays > 0)) return 'Average holding period must be greater than 0 days.';
+    if (!(params.annualTaxRatePct >= 0 && params.annualTaxRatePct <= 100)) return 'Annual tax rate must be between 0% and 100%.';
+    if (!(params.annualWithdrawal >= 0)) return 'Annual withdrawal must be $0 or greater.';
     return '';
   }
 
@@ -840,13 +900,23 @@ td strong { color: var(--text); }
         <td>${percent(result.fundedRate.median, 1)}</td>
         <td>${percent(result.skippedRate.median, 1)}</td>
       </tr>`).join('');
+    $('cashFlowBody').innerHTML = results.map((result) => `
+      <tr>
+        <td><strong>${result.label}</strong></td>
+        <td>${currency(result.taxesPaid.median)}</td>
+        <td>${currency(result.withdrawalsPaid.median)}</td>
+        <td>${currency(result.endingCapital.median)}</td>
+      </tr>`).join('');
   }
 
   function renderGoalSummary(results, params) {
     const full = results.find((result) => result.key === 'full');
     const modeText = params.allowMargin ? 'Margin is enabled with a 150% total-exposure ceiling.' : 'Margin is off, so total exposure is capped at 100% of equity.';
-    $('goalSummary').textContent = `${modeText} ${full.label} uses a ${percent(full.allocationFraction, 1)} total portfolio budget, divided into a target starting trade size of ${currency(full.startingBet)} based on roughly ${full.expectedConcurrentTrades.toFixed(1)} expected overlapping trades. The simulator never lets the total open-position budget drift above the selected Kelly level.`;
-    $('cadenceNote').innerHTML = `<strong>Inputs actually simulated:</strong> ${params.tradesPerWeek.toLocaleString('en-US', { maximumFractionDigits: 2 })} opportunities/week · ${params.holdingPeriodDays.toLocaleString('en-US', { maximumFractionDigits: 2 })}-day average hold · ${params.horizonYears.toLocaleString('en-US')} year horizon · ${params.simulations.toLocaleString('en-US')} paths · ${params.allowMargin ? 'margin up to 150%' : 'no margin'}.<br><strong>Portfolio-level sizing:</strong> Kelly sets the maximum total budget across all open positions. Target position size equals that budget divided by the expected overlap from trade frequency and holding period. Arrivals and actual holding periods still vary randomly.`;
+    const cashFlowText = (params.annualTaxRatePct > 0 || params.annualWithdrawal > 0)
+      ? ` Annual cash flows are enabled: ${params.annualTaxRatePct.toFixed(1)}% tax on positive realized yearly trading P&L and ${currency(params.annualWithdrawal)} withdrawn after each completed simulation year.`
+      : ' Annual taxes and withdrawals are off.';
+    $('goalSummary').textContent = `${modeText}${cashFlowText} ${full.label} uses a ${percent(full.allocationFraction, 1)} total portfolio budget, divided into a target starting trade size of ${currency(full.startingBet)} based on roughly ${full.expectedConcurrentTrades.toFixed(1)} expected overlapping trades. The simulator never lets the total open-position budget drift above the selected Kelly level.`;
+    $('cadenceNote').innerHTML = `<strong>Inputs actually simulated:</strong> ${params.tradesPerWeek.toLocaleString('en-US', { maximumFractionDigits: 2 })} opportunities/week · ${params.holdingPeriodDays.toLocaleString('en-US', { maximumFractionDigits: 2 })}-day average hold · ${params.horizonYears.toLocaleString('en-US')} year horizon · ${params.simulations.toLocaleString('en-US')} paths · ${params.allowMargin ? 'margin up to 150%' : 'no margin'} · annual tax ${params.annualTaxRatePct.toFixed(1)}% · annual withdrawal ${currency(params.annualWithdrawal)}.<br><strong>Portfolio-level sizing:</strong> Kelly sets the maximum total budget across all open positions. Target position size equals that budget divided by the expected overlap from trade frequency and holding period. Arrivals and actual holding periods still vary randomly.<br><strong>Year-end cash flow:</strong> Every 365 simulated days, tax is charged on positive realized trading P&L for that year, then the fixed withdrawal is deducted. If idle cash is insufficient, open positions are reduced proportionally to fund the payment.`;
     $('cadenceNote').classList.remove('hidden');
   }
 
@@ -961,7 +1031,7 @@ td strong { color: var(--text); }
 
   $('downloadCsv').addEventListener('click', () => {
     if (!latestSimulation) return;
-    const rows = [['Kelly level', 'Portfolio budget', 'Target size per trade', 'Starting 1R per trade', 'Median closed trades', 'Median calendar days', 'Median calendar years', 'Average holding period days', 'Median capital deployed', 'Median position size', 'Median open positions', 'Median funded opportunity rate', 'Median skipped opportunity rate', 'Target probability', 'Risk of ruin', 'Median max drawdown', 'Margin enabled']];
+    const rows = [['Kelly level', 'Portfolio budget', 'Target size per trade', 'Starting 1R per trade', 'Median closed trades', 'Median calendar days', 'Median calendar years', 'Average holding period days', 'Median capital deployed', 'Median position size', 'Median open positions', 'Median funded opportunity rate', 'Median skipped opportunity rate', 'Median taxes paid', 'Median withdrawals paid', 'Annual tax rate', 'Annual withdrawal', 'Target probability', 'Risk of ruin', 'Median max drawdown', 'Margin enabled']];
     latestSimulation.results.forEach((result) => rows.push([
       result.label, result.allocationFraction, result.startingBet, result.startingR,
       result.targetTrades.median ?? '', result.targetDays.median ?? '', result.targetDays.median ? result.targetDays.median / 365.25 : '',
@@ -1041,6 +1111,7 @@ td strong { color: var(--text); }
     $('goalKellyCards').innerHTML = '<p>Run the simulator to calculate full, half, and quarter Kelly.</p>';
     $('goalResultsBody').innerHTML = '<tr><td colspan="9" class="empty-cell">Run the simulator to see results.</td></tr>';
     $('utilizationBody').innerHTML = '<tr><td colspan="6" class="empty-cell">Run the simulator to see portfolio utilization.</td></tr>';
+    $('cashFlowBody').innerHTML = '<tr><td colspan="4" class="empty-cell">Run the simulator to see annual tax and withdrawal impact.</td></tr>';
     $('goalSummary').textContent = 'The result will explain the Kelly portfolio budget, target trade size, and how capital is used while trades overlap.';
     $('cadenceNote').classList.add('hidden');
     $('cadenceNote').innerHTML = '';
