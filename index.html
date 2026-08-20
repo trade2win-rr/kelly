@@ -4,8 +4,8 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <meta name="description" content="A portfolio-level Kelly allocation calculator and trading goal simulator with optional margin, annual tax withholding, and annual withdrawals." />
-  <title>KellyLab V7.3</title>
-  <!-- V7.3 is self-contained: portfolio-level Kelly budgets, optional 150% margin, annual tax withholding, annual withdrawals, year-end balance reporting, and capital-aware simulation. -->
+  <title>KellyLab V7.6</title>
+  <!-- V7.6 is self-contained: portfolio-level Kelly budgets, optional 150% margin, annual tax withholding, annual withdrawals, year-end balance reporting, and capital-aware simulation. -->
   <style>
 :root {
   --bg: #f3f5f8;
@@ -157,7 +157,7 @@ td strong { color: var(--text); }
     <header class="topbar">
       <div>
         <p class="eyebrow">TRADING ALLOCATION TOOL</p>
-        <h1>Kelly<span>Lab</span> <small class="build-badge">V7.3</small></h1>
+        <h1>Kelly<span>Lab</span> <small class="build-badge">V7.6</small></h1>
       </div>
       <button id="themeToggle" class="icon-button" type="button" aria-label="Toggle dark mode">◐</button>
     </header>
@@ -238,7 +238,7 @@ td strong { color: var(--text); }
               </label>
               <label>Annual tax rate <small>(optional)</small>
                 <div class="suffix-wrap"><input id="annualTaxRate" type="number" inputmode="decimal" step="any" min="0" max="100" placeholder="0" /><span>%</span></div>
-                <small>Applied at each completed simulation year to positive realized trading P&amp;L for that year only.</small>
+                <small>Applied at each completed simulation year to positive net realized trading P&amp;L for that year only. Margin debt is preserved when the tax is paid.</small>
               </label>
               <label>Annual withdrawal <small>(optional)</small>
                 <div class="money-wrap"><span>$</span><input id="annualWithdrawal" class="money-input" type="text" inputmode="decimal" data-decimals="0" placeholder="0" /></div>
@@ -300,11 +300,11 @@ td strong { color: var(--text); }
                   <tbody id="utilizationBody"><tr><td colspan="6" class="empty-cell">Run the simulator to see portfolio utilization.</td></tr></tbody>
                 </table>
               </div>
-              <h4 class="subsection-title">Annual cash-flow impact</h4>
+              <h4 class="subsection-title">Cumulative cash-flow impact</h4>
               <div class="table-wrap">
                 <table>
-                  <thead><tr><th>Kelly level</th><th>Median taxes paid</th><th>Median withdrawals</th><th>Median ending capital</th></tr></thead>
-                  <tbody id="cashFlowBody"><tr><td colspan="4" class="empty-cell">Run the simulator to see annual tax and withdrawal impact.</td></tr></tbody>
+                  <thead><tr><th>Kelly level</th><th>Median total taxes</th><th>Median total withdrawals</th><th>Median ending capital</th></tr></thead>
+                  <tbody id="cashFlowBody"><tr><td colspan="4" class="empty-cell">Run the simulator to see cumulative tax and withdrawal impact.</td></tr></tbody>
                 </table>
               </div>
               <h4 class="subsection-title">Year-end account progression</h4>
@@ -314,7 +314,7 @@ td strong { color: var(--text); }
                   <tbody id="yearEndBalanceBody"><tr><td colspan="3" class="empty-cell">Run the simulator to see each year-end balance.</td></tr></tbody>
                 </table>
               </div>
-              <p class="year-end-note"><strong>Before</strong> is the median account balance immediately before that year’s tax and withdrawal. <strong>After</strong> is the median balance carried into the following year after those deductions.</p>
+              <p class="year-end-note"><strong>Before</strong> is the median account balance immediately before that year’s deductions. Tax is the entered rate applied to that simulation year’s positive <strong>net realized trading P&amp;L</strong>; a losing year has no tax in this simplified withholding model and losses are not carried forward. The fixed withdrawal is deducted after tax. <strong>After</strong> is the balance carried into the next year. If the target is reached during a year, trading stops immediately, but that year’s tax and withdrawal are still processed at year-end. Each displayed row is a separate Monte Carlo median, so the four displayed medians may differ slightly from exact subtraction even though every individual simulation path reconciles exactly.</p>
               <p id="goalSummary" class="summary-text">The result will explain the Kelly portfolio budget, target trade size, and how capital is used while trades overlap.</p>
               <div id="cadenceNote" class="info-box hidden"></div>
             </section>
@@ -508,26 +508,17 @@ td strong { color: var(--text); }
   function grossExposure(openPositions) { return openPositions.reduce((sum, position) => sum + position.bet, 0); }
   function portfolioEquity(cash, openPositions) { return cash + grossExposure(openPositions); }
 
-  // Pays an external cash obligation from idle cash first, then proportionally reduces open positions if needed.
+  // Pays an external cash obligation while preserving any margin debit.
+  // Equity must fall dollar-for-dollar by the payment. With margin, cash may already
+  // be negative; never clamp that negative balance to zero, because that would erase
+  // borrowed money and artificially inflate account equity. Exposure is rebalanced
+  // separately by trimToBudget after the payment.
   function deductFromPortfolio(cash, openPositions, amount) {
     const requested = Math.max(0, Number(amount) || 0);
     if (!(requested > 0)) return { cash, openPositions, paid: 0 };
-    let remaining = requested;
-    const fromCash = Math.min(Math.max(0, cash), remaining);
-    cash -= fromCash;
-    remaining -= fromCash;
-    let paid = fromCash;
-    if (remaining > 0) {
-      const gross = grossExposure(openPositions);
-      const fromPositions = Math.min(gross, remaining);
-      if (fromPositions > 0 && gross > 0) {
-        const scale = Math.max(0, (gross - fromPositions) / gross);
-        openPositions.forEach((position) => { position.bet *= scale; });
-        paid += fromPositions;
-        remaining -= fromPositions;
-      }
-    }
-    return { cash: Math.max(0, cash), openPositions, paid };
+    const equity = Math.max(0, portfolioEquity(cash, openPositions));
+    const paid = Math.min(requested, equity);
+    return { cash: cash - paid, openPositions, paid };
   }
 
   // Keeps already-open positions inside the selected Kelly portfolio budget after equity changes.
@@ -560,6 +551,8 @@ td strong { color: var(--text); }
     const targetDays = [], targetClosedTrades = [], maxDrawdowns = [], endings = [], fundedRates = [], skippedRates = [], deployedFractions = [], positionSizeFractions = [], averageOpenPositions = [], taxesPaid = [], withdrawalsPaid = [];
     const completedYears = Math.floor(maxDays / 365);
     const yearEndBeforeBuckets = Array.from({ length: completedYears }, () => []);
+    const yearEndTaxBuckets = Array.from({ length: completedYears }, () => []);
+    const yearEndWithdrawalBuckets = Array.from({ length: completedYears }, () => []);
     const yearEndAfterBuckets = Array.from({ length: completedYears }, () => []);
     const samplePaths = [];
     let targetCount = 0, ruinCount = 0, unresolvedCount = 0, drawdown50Count = 0, drawdown75Count = 0;
@@ -572,18 +565,16 @@ td strong { color: var(--text); }
       let exposureSum = 0, openCountSum = 0, observedDays = 0, positionFractionSum = 0, positionEntries = 0;
       let yearlyRealizedPnl = 0, totalTaxPaid = 0, totalWithdrawalPaid = 0;
       let resolvedStats = null;
-      // Once a path first reaches the target, V7.2 uses a separate RNG only for the
-      // post-target year-end continuation. This preserves the original V7.1 random
-      // sequence—and therefore the original goal/risk results—for every later path.
-      const annualRandom = mulberry32(hashString(`${seedText}|${scenario.key}|annual-continuation|${sim}`));
-      const pathRandom = () => outcome === 'target' ? annualRandom() : random();
       const annualBeforeBalances = new Array(completedYears).fill(null);
+      const annualTaxes = new Array(completedYears).fill(null);
+      const annualWithdrawals = new Array(completedYears).fill(null);
       const annualAfterBalances = new Array(completedYears).fill(null);
       const capture = sim < desiredSamples;
       const points = capture ? [{ day: 0, equity }] : null;
 
       for (let day = 1; day <= maxDays; day += 1) {
-        if (openPositions.length) {
+        // Trading stops once the target has been reached. Until then, close positions due today.
+        if (outcome === 'unresolved' && openPositions.length) {
           const remaining = [];
           for (const position of openPositions) {
             if (position.exitDay <= day) {
@@ -596,94 +587,134 @@ td strong { color: var(--text); }
           openPositions = remaining;
         }
 
-        // Every 365 simulated days, record the pre-cash-flow balance, then pay tax on
-        // positive realized P&L for that year and take the optional fixed withdrawal.
-        if (day % 365 === 0) {
+        if (outcome === 'unresolved') {
+          let trimmed = trimToBudget(cash, openPositions, allocation);
+          cash = trimmed.cash; openPositions = trimmed.openPositions; equity = trimmed.equity;
+          if (!Number.isFinite(equity) || equity < 0) equity = 0;
+          if (equity > peak) peak = equity;
+          const drawdown = peak > 0 ? 1 - equity / peak : 1;
+          if (drawdown > maxDrawdown) maxDrawdown = drawdown;
+
+          // The target is a pre-year-end-cash-flow goal. If it is reached, record the hit
+          // immediately and freeze the trading portfolio at its current modeled value.
+          if (equity >= targetCapital) {
+            outcome = 'target';
+            endingDay = day;
+            targetCount += 1;
+            targetDays.push(day);
+            targetClosedTrades.push(closedTrades);
+            resolvedStats = { equity, maxDrawdown, opportunities, funded, partial, skipped, exposureSum, openCountSum, observedDays, positionFractionSum, positionEntries };
+            if (capture) points.push({ day, equity });
+            cash = equity;
+            openPositions = [];
+          } else if (equity <= ruinCapital) {
+            outcome = 'ruin';
+            endingDay = day;
+            ruinCount += 1;
+            resolvedStats = { equity, maxDrawdown, opportunities, funded, partial, skipped, exposureSum, openCountSum, observedDays, positionFractionSum, positionEntries };
+            if (capture) points.push({ day, equity });
+            break;
+          }
+        } else if (outcome === 'target') {
+          // After the goal is reached, no more trading occurs. Cash stays idle except for
+          // the optional year-end tax and withdrawal events below.
+          equity = cash;
+        }
+
+        // At each completed simulation year: record the balance, pay tax on that year's
+        // positive NET realized trading P&L, then take the fixed annual withdrawal.
+        if (day % 365 === 0 && outcome !== 'ruin') {
           const yearIndex = Math.floor(day / 365) - 1;
           const beforeCashFlowEquity = portfolioEquity(cash, openPositions);
-          if (yearIndex >= 0 && yearIndex < annualBeforeBalances.length) annualBeforeBalances[yearIndex] = beforeCashFlowEquity;
-
           const taxDue = Math.max(0, yearlyRealizedPnl) * annualTaxRate;
           let payment = deductFromPortfolio(cash, openPositions, taxDue);
-          cash = payment.cash; openPositions = payment.openPositions; totalTaxPaid += payment.paid;
+          cash = payment.cash; openPositions = payment.openPositions;
+          const taxPaidThisYear = payment.paid;
+          totalTaxPaid += taxPaidThisYear;
+
           payment = deductFromPortfolio(cash, openPositions, annualWithdrawalAmount);
-          cash = payment.cash; openPositions = payment.openPositions; totalWithdrawalPaid += payment.paid;
+          cash = payment.cash; openPositions = payment.openPositions;
+          const withdrawalPaidThisYear = payment.paid;
+          totalWithdrawalPaid += withdrawalPaidThisYear;
           yearlyRealizedPnl = 0;
+
+          const trimmed = trimToBudget(cash, openPositions, allocation);
+          cash = trimmed.cash; openPositions = trimmed.openPositions; equity = trimmed.equity;
+
+          if (yearIndex >= 0 && yearIndex < annualAfterBalances.length) {
+            annualBeforeBalances[yearIndex] = beforeCashFlowEquity;
+            annualTaxes[yearIndex] = taxPaidThisYear;
+            annualWithdrawals[yearIndex] = withdrawalPaidThisYear;
+            annualAfterBalances[yearIndex] = equity;
+          }
+
+          // Taxes/withdrawals can exhaust an unresolved account and therefore count toward ruin.
+          if (outcome === 'unresolved' && equity <= ruinCapital) {
+            outcome = 'ruin';
+            endingDay = day;
+            ruinCount += 1;
+            resolvedStats = { equity, maxDrawdown, opportunities, funded, partial, skipped, exposureSum, openCountSum, observedDays, positionFractionSum, positionEntries };
+            if (capture) points.push({ day, equity });
+            break;
+          }
         }
 
-        let trimmed = trimToBudget(cash, openPositions, allocation);
-        cash = trimmed.cash; openPositions = trimmed.openPositions; equity = trimmed.equity;
-        if (!Number.isFinite(equity) || equity < 0) equity = 0;
-        if (equity > peak) peak = equity;
-        const drawdown = peak > 0 ? 1 - equity / peak : 1;
-        if (drawdown > maxDrawdown) maxDrawdown = drawdown;
+        if (outcome === 'unresolved') {
+          const arrivals = poisson(dailyArrivalRate, random);
+          for (let a = 0; a < arrivals; a += 1) {
+            opportunities += 1;
+            equity = portfolioEquity(cash, openPositions);
+            const gross = grossExposure(openPositions);
+            const portfolioBudget = equity * allocation;
+            const availableBudget = Math.max(0, portfolioBudget - gross);
+            const targetBet = equity * targetTradeFraction;
+            const actualBet = Math.min(targetBet, availableBudget);
 
-        if (day % 365 === 0) {
-          const yearIndex = Math.floor(day / 365) - 1;
-          if (yearIndex >= 0 && yearIndex < annualAfterBalances.length) annualAfterBalances[yearIndex] = equity;
-        }
+            if (!(actualBet > Math.max(1e-9, equity * 1e-12))) { skipped += 1; continue; }
+            if (actualBet + 1e-9 < targetBet) partial += 1; else funded += 1;
+            cash -= actualBet;
+            const holdDays = sampleHoldingDays(holdingPeriodDays, random);
+            openPositions.push({ bet: actualBet, won: random() < p, exitDay: day + holdDays });
+            positionFractionSum += equity > 0 ? actualBet / equity : 0;
+            positionEntries += 1;
+          }
 
-        if (outcome === 'unresolved' && equity >= targetCapital) {
-          outcome = 'target';
-          endingDay = day;
-          targetCount += 1;
-          targetDays.push(day);
-          targetClosedTrades.push(closedTrades);
-          resolvedStats = { equity, maxDrawdown, opportunities, funded, partial, skipped, exposureSum, openCountSum, observedDays, positionFractionSum, positionEntries, totalTaxPaid, totalWithdrawalPaid };
-          if (capture) points.push({ day, equity });
-          // Continue the economic path only to populate later year-end balances.
-          // Core goal, risk, utilization, tax, and withdrawal statistics remain frozen at the first target hit.
-        }
-        if (outcome === 'unresolved' && equity <= ruinCapital) {
-          outcome = 'ruin';
-          endingDay = day;
-          ruinCount += 1;
-          resolvedStats = { equity, maxDrawdown, opportunities, funded, partial, skipped, exposureSum, openCountSum, observedDays, positionFractionSum, positionEntries, totalTaxPaid, totalWithdrawalPaid };
-          if (capture) points.push({ day, equity });
-          break;
-        }
-
-        const arrivals = poisson(dailyArrivalRate, pathRandom);
-        for (let a = 0; a < arrivals; a += 1) {
-          opportunities += 1;
           equity = portfolioEquity(cash, openPositions);
           const gross = grossExposure(openPositions);
-          const portfolioBudget = equity * allocation;
-          const availableBudget = Math.max(0, portfolioBudget - gross);
-          const targetBet = equity * targetTradeFraction;
-          const actualBet = Math.min(targetBet, availableBudget);
-
-          if (!(actualBet > Math.max(1e-9, equity * 1e-12))) { skipped += 1; continue; }
-          if (actualBet + 1e-9 < targetBet) partial += 1; else funded += 1;
-          cash -= actualBet;
-          const holdDays = sampleHoldingDays(holdingPeriodDays, pathRandom);
-          openPositions.push({ bet: actualBet, won: pathRandom() < p, exitDay: day + holdDays });
-          positionFractionSum += equity > 0 ? actualBet / equity : 0;
-          positionEntries += 1;
+          observedDays += 1;
+          exposureSum += equity > 0 ? gross / equity : 0;
+          openCountSum += openPositions.length;
+          if (capture && (day % sampleEveryDays === 0 || day === maxDays)) points.push({ day, equity });
         }
-
-        equity = portfolioEquity(cash, openPositions);
-        const gross = grossExposure(openPositions);
-        observedDays += 1;
-        exposureSum += equity > 0 ? gross / equity : 0;
-        openCountSum += openPositions.length;
-        if (capture && outcome === 'unresolved' && (day % sampleEveryDays === 0 || day === maxDays)) points.push({ day, equity });
       }
 
-      // Ruined paths are treated as absorbing for the year-end progression table.
-      // Target paths continue through the horizon so later year-end balances remain meaningful.
+      // A ruined path is held at terminal equity for later reporting columns. Target-hit
+      // paths continue as idle cash, so their subsequent annual withdrawals are actually applied.
+      if (outcome === 'ruin') {
+        for (let y = 0; y < annualAfterBalances.length; y += 1) {
+          if (!Number.isFinite(annualBeforeBalances[y])) annualBeforeBalances[y] = equity;
+          if (!Number.isFinite(annualTaxes[y])) annualTaxes[y] = 0;
+          if (!Number.isFinite(annualWithdrawals[y])) annualWithdrawals[y] = 0;
+          if (!Number.isFinite(annualAfterBalances[y])) annualAfterBalances[y] = equity;
+        }
+      }
+
       for (let y = 0; y < annualAfterBalances.length; y += 1) {
-        if (!Number.isFinite(annualBeforeBalances[y])) annualBeforeBalances[y] = equity;
-        if (!Number.isFinite(annualAfterBalances[y])) annualAfterBalances[y] = equity;
+        if (!Number.isFinite(annualBeforeBalances[y])) annualBeforeBalances[y] = portfolioEquity(cash, openPositions);
+        if (!Number.isFinite(annualTaxes[y])) annualTaxes[y] = 0;
+        if (!Number.isFinite(annualWithdrawals[y])) annualWithdrawals[y] = 0;
+        if (!Number.isFinite(annualAfterBalances[y])) annualAfterBalances[y] = portfolioEquity(cash, openPositions);
         yearEndBeforeBuckets[y].push(annualBeforeBalances[y]);
+        yearEndTaxBuckets[y].push(annualTaxes[y]);
+        yearEndWithdrawalBuckets[y].push(annualWithdrawals[y]);
         yearEndAfterBuckets[y].push(annualAfterBalances[y]);
       }
 
       if (outcome === 'unresolved') unresolvedCount += 1;
-      const stats = resolvedStats || { equity, maxDrawdown, opportunities, funded, partial, skipped, exposureSum, openCountSum, observedDays, positionFractionSum, positionEntries, totalTaxPaid, totalWithdrawalPaid };
+      const stats = resolvedStats || { equity, maxDrawdown, opportunities, funded, partial, skipped, exposureSum, openCountSum, observedDays, positionFractionSum, positionEntries };
       if (stats.maxDrawdown >= 0.5) drawdown50Count += 1;
       if (stats.maxDrawdown >= 0.75) drawdown75Count += 1;
-      maxDrawdowns.push(stats.maxDrawdown); endings.push(stats.equity); taxesPaid.push(stats.totalTaxPaid); withdrawalsPaid.push(stats.totalWithdrawalPaid);
+      maxDrawdowns.push(stats.maxDrawdown); endings.push(stats.equity); taxesPaid.push(totalTaxPaid); withdrawalsPaid.push(totalWithdrawalPaid);
       const participated = stats.funded + stats.partial;
       fundedRates.push(stats.opportunities > 0 ? participated / stats.opportunities : 0);
       skippedRates.push(stats.opportunities > 0 ? stats.skipped / stats.opportunities : 0);
@@ -692,12 +723,18 @@ td strong { color: var(--text); }
       averageOpenPositions.push(stats.observedDays > 0 ? stats.openCountSum / stats.observedDays : 0);
       totalOpportunities += stats.opportunities; totalFunded += stats.funded; totalPartial += stats.partial; totalSkipped += stats.skipped;
 
-      if (capture) { const last = points[points.length - 1]; if (!last || last.day !== endingDay) points.push({ day: endingDay, equity: stats.equity }); samplePaths.push(points); }
+      if (capture) {
+        const last = points[points.length - 1];
+        if (!last || last.day !== endingDay) points.push({ day: endingDay, equity: stats.equity });
+        samplePaths.push(points);
+      }
     }
 
     const targetDayStats = summarizeCensoredTarget(targetDays, simulations), targetTradeStats = summarizeCensoredTarget(targetClosedTrades, simulations);
     const drawdownStats = summarize(maxDrawdowns), endingStats = summarize(endings), fundedRateStats = summarize(fundedRates), skippedRateStats = summarize(skippedRates), deployedStats = summarize(deployedFractions), positionSizeStats = summarize(positionSizeFractions), openPositionStats = summarize(averageOpenPositions), taxStats = summarize(taxesPaid), withdrawalStats = summarize(withdrawalsPaid);
     const yearEndBeforeBalances = yearEndBeforeBuckets.map((values, index) => ({ year: index + 1, ...summarize(values) }));
+    const yearEndTaxes = yearEndTaxBuckets.map((values, index) => ({ year: index + 1, ...summarize(values) }));
+    const yearEndWithdrawals = yearEndWithdrawalBuckets.map((values, index) => ({ year: index + 1, ...summarize(values) }));
     const yearEndAfterBalances = yearEndAfterBuckets.map((values, index) => ({ year: index + 1, ...summarize(values) }));
     const targetWithinOneYear = targetDays.filter((day) => day <= 365.25).length;
 
@@ -715,7 +752,7 @@ td strong { color: var(--text); }
       drawdown50Probability: drawdown50Count / simulations, drawdown75Probability: drawdown75Count / simulations, oneYearProbability: targetWithinOneYear / simulations,
       targetDays: targetDayStats, targetTrades: targetTradeStats, maxDrawdown: drawdownStats, endingCapital: endingStats,
       fundedRate: fundedRateStats, skippedRate: skippedRateStats, deployedFraction: deployedStats, averagePositionSizeFraction: positionSizeStats, averageOpenPositions: openPositionStats,
-      taxesPaid: taxStats, withdrawalsPaid: withdrawalStats, yearEndBeforeBalances, yearEndAfterBalances,
+      taxesPaid: taxStats, withdrawalsPaid: withdrawalStats, yearEndBeforeBalances, yearEndTaxes, yearEndWithdrawals, yearEndAfterBalances,
       overallFundedRate: totalOpportunities > 0 ? (totalFunded + totalPartial) / totalOpportunities : 0,
       overallSkippedRate: totalOpportunities > 0 ? totalSkipped / totalOpportunities : 0,
       totalOpportunities, totalFunded, totalPartial, totalSkipped, samplePaths,
@@ -970,12 +1007,20 @@ td strong { color: var(--text); }
       </tr>`).join('');
 
     const maxYears = Math.max(0, ...results.map((result) => Math.max(result.yearEndBeforeBalances?.length || 0, result.yearEndAfterBalances?.length || 0)));
-    $('yearEndBalanceHead').innerHTML = `<tr><th>Kelly level</th><th>Balance type</th>${Array.from({ length: maxYears }, (_, i) => `<th>Year ${i + 1}</th>`).join('')}</tr>`;
+    $('yearEndBalanceHead').innerHTML = `<tr><th>Kelly level</th><th>Year-end item</th>${Array.from({ length: maxYears }, (_, i) => `<th>Year ${i + 1}</th>`).join('')}</tr>`;
     $('yearEndBalanceBody').innerHTML = results.map((result) => `
       <tr>
-        <td rowspan="2"><strong>${result.label}</strong></td>
+        <td rowspan="4"><strong>${result.label}</strong></td>
         <td>Before taxes &amp; withdrawal</td>
         ${Array.from({ length: maxYears }, (_, i) => `<td>${currency(result.yearEndBeforeBalances?.[i]?.median)}</td>`).join('')}
+      </tr>
+      <tr>
+        <td>Tax paid</td>
+        ${Array.from({ length: maxYears }, (_, i) => `<td>-${currency(result.yearEndTaxes?.[i]?.median)}</td>`).join('')}
+      </tr>
+      <tr>
+        <td>Withdrawal</td>
+        ${Array.from({ length: maxYears }, (_, i) => `<td>-${currency(result.yearEndWithdrawals?.[i]?.median)}</td>`).join('')}
       </tr>
       <tr class="after-cashflow-row">
         <td>After taxes &amp; withdrawal</td>
@@ -1185,9 +1230,9 @@ td strong { color: var(--text); }
     $('goalKellyCards').innerHTML = '<p>Run the simulator to calculate full, half, and quarter Kelly.</p>';
     $('goalResultsBody').innerHTML = '<tr><td colspan="9" class="empty-cell">Run the simulator to see results.</td></tr>';
     $('utilizationBody').innerHTML = '<tr><td colspan="6" class="empty-cell">Run the simulator to see portfolio utilization.</td></tr>';
-    $('cashFlowBody').innerHTML = '<tr><td colspan="4" class="empty-cell">Run the simulator to see annual tax and withdrawal impact.</td></tr>';
-    $('yearEndBalanceHead').innerHTML = '<tr><th>Kelly level</th><th>Year 1</th></tr>';
-    $('yearEndBalanceBody').innerHTML = '<tr><td colspan="2" class="empty-cell">Run the simulator to see each year-end balance.</td></tr>';
+    $('cashFlowBody').innerHTML = '<tr><td colspan="4" class="empty-cell">Run the simulator to see cumulative tax and withdrawal impact.</td></tr>';
+    $('yearEndBalanceHead').innerHTML = '<tr><th>Kelly level</th><th>Year-end item</th><th>Year 1</th></tr>';
+    $('yearEndBalanceBody').innerHTML = '<tr><td colspan="3" class="empty-cell">Run the simulator to see each year-end balance.</td></tr>';
     $('goalSummary').textContent = 'The result will explain the Kelly portfolio budget, target trade size, and how capital is used while trades overlap.';
     $('cadenceNote').classList.add('hidden');
     $('cadenceNote').innerHTML = '';
